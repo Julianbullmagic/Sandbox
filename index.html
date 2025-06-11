@@ -1,0 +1,1032 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Isometric Sandbox Game</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #87CEEB;
+            font-family: Arial, sans-serif;
+        }
+
+        #gameContainer {
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+            z-index: 10;
+        }
+
+        #inventory {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: white;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+            z-index: 10;
+        }
+
+        #materialInventory p {
+            cursor: pointer;
+            padding: 5px;
+            margin: 2px 0;
+            border-radius: 3px;
+        }
+
+        #materialInventory p.selected {
+            background-color: rgba(255, 255, 255, 0.2);
+            border: 1px solid white;
+        }
+
+        #controls {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer"></div>
+    <div id="ui">
+        <div>Player Position: <span id="playerPos">0, 0, 0</span></div>
+        <div>Blocks Generated: <span id="blockCount">0</span></div>
+        <div>Visible Blocks: <span id="visibleCount">0</span></div>
+        <div>Last Move Direction: <span id="lastDirection">None</span></div>
+    </div>
+    <div id="inventory">
+        <h3>Inventory</h3>
+        <div id="materialInventory"></div>
+    </div>
+    <div id="controls">
+        <div>Controls:</div>
+        <div>Arrow Keys / WASD - Move Player</div>
+        <div>Scroll - Zoom Camera</div>
+        <div>Spacebar - Destroy Block in Last Moved Direction</div>
+        <div>Alt - Place Selected Block</div>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Game variables
+        let scene, camera, renderer;
+        let player, terrain = [], blockMeshes = [];
+        let worldSize = 50;
+        let blockSize = 1;
+        let noiseScale = 0.05;
+        let playerPos = new THREE.Vector3(25, 0, 25);
+        let keys = {};
+        let visibleBlocks = 0;
+        let playerLastMoveDirection = new THREE.Vector3(0, 0, 0);
+        let inventory = {};
+        let selectedMaterial = null;
+    const TOOLS = {
+        PICKAXE: { id: 0, name: 'Pickaxe' }
+    };
+    let equippedTool = null;
+    let playerAnimationsWithPickaxe = {
+        idleFront: null,
+        idleBack: null,
+        runFront: null,
+        runBack: null,
+        miningFront: null,
+        miningBack: null
+    };
+    let isMining = false;
+    let miningAnimationComplete = true;
+
+        // Camera offset from player
+    const cameraOffset = new THREE.Vector3(-3.75, 5, -3.75); // Half the original values for closer zoom
+
+        // Block materials with frequency property updatePlayer
+        const MATERIALS = {
+            SOIL: { id: 0, name: 'Soil', color: 0x8B4513, topColor: 0x228B22, frequency: 4 },
+            ROCK: { id: 1, name: 'Rock', color: 0x696969, frequency: 3 },
+            WOOD: { id: 2, name: 'Wood', color: 0x8B4513, frequency: 2 },
+            METAL: { id: 3, name: 'Metal', color: 0xB0C4DE, frequency: 1 }
+        };
+
+        // Animation variables
+        let playerAnimations = {
+            idleFront: null,
+            idleBack: null,
+            runFront: null,
+            runBack: null
+        };
+        let currentAnimation = null;
+        let playerSprite = null;
+        let lastAnimationTime = 0;
+        let playerFacing = 'front'; // 'front' or 'back'
+        let playerFlipX = false; // Whether to flip the sprite horizontally
+
+        // Sprite Animator Class
+       
+    class SpriteAnimator {
+        constructor(texture, horizontalFrames, verticalFrames, frameDuration, loop = true) {
+            this.texture = texture;
+            this.horizontalFrames = horizontalFrames;
+            this.verticalFrames = verticalFrames;
+            this.frameDuration = frameDuration;
+            this.totalFrames = horizontalFrames * verticalFrames;
+            this.loop = loop;
+            
+            this.frameWidth = 1 / horizontalFrames;
+            this.frameHeight = 1 / verticalFrames;
+            
+            this.currentFrame = 0;
+            this.animationTime = 0;
+            this.playing = false;
+            this.completed = false;
+            
+            this.texture.wrapS = THREE.RepeatWrapping;
+            this.texture.wrapT = THREE.RepeatWrapping;
+            this.texture.repeat.set(this.frameWidth, this.frameHeight);
+            
+            this.updateFrame(0);
+        }
+        
+        updateFrame(frameIndex) {
+            const column = frameIndex % this.horizontalFrames;
+            const row = Math.floor(frameIndex / this.horizontalFrames);
+            
+            this.texture.offset.x = column * this.frameWidth;
+            this.texture.offset.y = 1 - (row + 1) * this.frameHeight;
+        }
+        
+        play() {
+            this.playing = true;
+            this.animationTime = 0;
+            this.currentFrame = 0;
+            this.completed = false;
+        }
+        
+        stop() {
+            this.playing = false;
+        }
+        
+        update(deltaTime) {
+            if (!this.playing) return;
+            
+            this.animationTime += deltaTime;
+            
+            const newFrame = Math.floor(this.animationTime / this.frameDuration);
+            
+            if (newFrame !== this.currentFrame) {
+                if (newFrame >= this.totalFrames) {
+                    if (this.loop) {
+                        this.currentFrame = newFrame % this.totalFrames;
+                    } else {
+                        this.currentFrame = this.totalFrames - 1;
+                        this.completed = true;
+                        this.stop();
+                    }
+                } else {
+                    this.currentFrame = newFrame;
+                }
+                this.updateFrame(this.currentFrame);
+            }
+        }
+    }
+
+        // Initialize the game
+        async function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.getElementById('gameContainer').appendChild(renderer.domElement);
+
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.9);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+            directionalLight.position.set(50, 50, 25);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            directionalLight.shadow.camera.near = 0.5;
+            directionalLight.shadow.camera.far = 200;
+            directionalLight.shadow.camera.left = -50;
+            directionalLight.shadow.camera.right = 50;
+            directionalLight.shadow.camera.top = 50;
+            directionalLight.shadow.camera.bottom = -50;
+            scene.add(directionalLight);
+
+            // Load textures
+                   const textureLoader = new THREE.TextureLoader();
+        
+        const loadTexture = (url) => new Promise(resolve => {
+            const tex = textureLoader.load(url, resolve);
+            tex.minFilter = THREE.NearestFilter;
+            tex.magFilter = THREE.NearestFilter;
+        });
+        
+        // Load regular animations updatePlayerAni
+        const idleFrontTexture = await loadTexture('https://res.cloudinary.com/julianbullmagic/image/upload/v1749555268/idle_front_ouczmk.png');
+        const idleBackTexture = await loadTexture('https://res.cloudinary.com/julianbullmagic/image/upload/v1749555251/idle_back_ynbp4i.png');
+        const runFrontTexture = await loadTexture('https://res.cloudinary.com/julianbullmagic/image/upload/v1749555364/run_front_tshbuo.png');
+        const runBackTexture = await loadTexture('https://res.cloudinary.com/julianbullmagic/image/upload/v1749555358/run_back_moavxi.png');
+        
+        // Load pickaxe animations
+        const idlePickaxeFrontTexture = await loadTexture('https://res.cloudinary.com/julianbullmagic/image/upload/v1749555315/idle_whit_pickaxe_front_hyk0td.png');
+        const idlePickaxeBackTexture = await loadTexture('https://res.cloudinary.com/julianbullmagic/image/upload/v1749555251/idle_back_ynbp4i.png'); // Assuming same as regular back
+        const runPickaxeFrontTexture = await loadTexture('https://res.cloudinary.com/julianbullmagic/image/upload/v1749616142/run_whit_pickaxe_front_wfogfs.png');
+        const runPickaxeBackTexture = await loadTexture('https://res.cloudinary.com/julianbullmagic/image/upload/v1749616139/run_whit_pickaxe_back_jxdwm0.png');
+        const miningFrontTexture = await loadTexture('https://res.cloudinary.com/julianbullmagic/image/upload/v1749555351/mining_front_bj6d3k.png');
+        const miningBackTexture = await loadTexture('https://res.cloudinary.com/julianbullmagic/image/upload/v1749555344/mining_back_z4tivx.png');
+
+        // Create regular animations
+        playerAnimations.idleFront = new SpriteAnimator(idleFrontTexture, 8, 1, 0.1);
+        playerAnimations.idleBack = new SpriteAnimator(idleBackTexture, 8, 1, 0.1);
+        playerAnimations.runFront = new SpriteAnimator(runFrontTexture, 8, 1, 0.1);
+        playerAnimations.runBack = new SpriteAnimator(runBackTexture, 8, 1, 0.1);
+        
+        // Create pickaxe animations
+        playerAnimationsWithPickaxe.idleFront = new SpriteAnimator(idlePickaxeFrontTexture, 8, 1, 0.1);
+        playerAnimationsWithPickaxe.idleBack = new SpriteAnimator(idlePickaxeBackTexture, 8, 1, 0.1);
+        playerAnimationsWithPickaxe.runFront = new SpriteAnimator(runPickaxeFrontTexture, 8, 1, 0.1);
+        playerAnimationsWithPickaxe.runBack = new SpriteAnimator(runPickaxeBackTexture, 8, 1, 0.1);
+        playerAnimationsWithPickaxe.miningFront = new SpriteAnimator(miningFrontTexture, 8, 1, 0.05, false); // Faster animation for mining
+        playerAnimationsWithPickaxe.miningBack = new SpriteAnimator(miningBackTexture, 8, 1, 0.05, false); // Faster animation for mining
+            
+            generateTerrain();
+            createPlayer();
+            updateCameraPosition();
+            setupControls();
+            updateInventoryUI();
+
+            animate();
+        }
+
+           // Replace the createPlayer function with: cameraOffset
+    function createPlayer() {
+        // Create sprite material using the idle front animation
+        const spriteMaterial = new THREE.SpriteMaterial({
+            map: playerAnimations.idleFront.texture,
+            transparent: true,
+            color: 0xffffff
+        });
+        
+        playerSprite = new THREE.Sprite(spriteMaterial);
+        // Scale to match the sprite proportions (48x32)
+        // We'll make the sprite 1.5 units wide (48/32) and 1 unit tall
+        playerSprite.scale.set(1.5, 1, 1);
+        playerSprite.position.copy(playerPos);
+        
+        // Set initial animation
+        currentAnimation = playerAnimations.idleFront;
+        currentAnimation.play();
+        
+        scene.add(playerSprite);
+        player = playerSprite;
+    }
+
+    function updatePlayerAnimation(deltaTime) {
+        // Check if mining animation should be playing
+        if (isMining && equippedTool && equippedTool.id === TOOLS.PICKAXE.id) {
+            // Update the mining animation
+            currentAnimation.update(deltaTime);
+            
+            // Check if animation completed
+            if (currentAnimation.completed) {
+                isMining = false;
+                miningAnimationComplete = true;
+                
+                // Return to idle after mining
+                const animationSet = playerAnimationsWithPickaxe;
+                currentAnimation = playerFacing === 'front' ? 
+                    animationSet.idleFront : 
+                    animationSet.idleBack;
+                currentAnimation.play();
+            }
+            
+            // Update sprite texture and flipping
+            playerSprite.material.map = currentAnimation.texture;
+            playerSprite.material.map.repeat.x = playerFlipX ? 
+                -Math.abs(currentAnimation.frameWidth) : 
+                Math.abs(currentAnimation.frameWidth);
+            playerSprite.material.map.offset.x = playerFlipX ? 
+                1 - currentAnimation.texture.offset.x - currentAnimation.frameWidth : 
+                currentAnimation.texture.offset.x;
+            playerSprite.material.needsUpdate = true;
+            
+            // Skip other animation logic while mining keydown
+            return;
+        }
+
+
+
+        // Determine if player is moving
+        const isMoving = keys['ArrowUp'] || keys['ArrowDown'] || 
+                        keys['ArrowLeft'] || keys['ArrowRight'] || 
+                        keys['KeyW'] || keys['KeyS'] || 
+                        keys['KeyA'] || keys['KeyD'];
+        
+        // Determine facing direction
+        if (playerLastMoveDirection.lengthSq() > 0) {
+            const dotProduct = playerLastMoveDirection.x + playerLastMoveDirection.z;
+            playerFacing = dotProduct > 0 ? 'back' : 'front';
+            
+            if (playerFacing === 'front') {
+                playerFlipX = playerLastMoveDirection.x > playerLastMoveDirection.z;
+            } else {
+                playerFlipX = playerLastMoveDirection.x < playerLastMoveDirection.z;
+            }
+        }
+        
+        // Choose animation set based on equipped tool
+        const animationSet = equippedTool ? playerAnimationsWithPickaxe : playerAnimations;
+        
+        // Choose appropriate animation
+        let newAnimation;
+        if (isMining && equippedTool) {
+            newAnimation = playerFacing === 'front' ? 
+                playerAnimationsWithPickaxe.miningFront : 
+                playerAnimationsWithPickaxe.miningBack;
+            miningAnimationComplete = false;
+        } else if (isMoving) {
+            newAnimation = playerFacing === 'front' ? animationSet.runFront : animationSet.runBack;
+        } else {
+            newAnimation = playerFacing === 'front' ? animationSet.idleFront : animationSet.idleBack;
+        }
+        
+        // Switch animation if needed
+        if (newAnimation !== currentAnimation) {
+            currentAnimation.stop();
+            currentAnimation = newAnimation;
+            currentAnimation.play();
+        }
+        
+        // Update current animation
+        currentAnimation.update(deltaTime);
+        
+        // Update sprite texture and flipping updateInventory
+        playerSprite.material.map = currentAnimation.texture;
+        playerSprite.material.map.repeat.x = playerFlipX ? 
+            -Math.abs(currentAnimation.frameWidth) : 
+            Math.abs(currentAnimation.frameWidth);
+        playerSprite.material.map.offset.x = playerFlipX ? 
+            1 - currentAnimation.texture.offset.x - currentAnimation.frameWidth : 
+            currentAnimation.texture.offset.x;
+        
+        playerSprite.material.needsUpdate = true;
+    }
+
+
+        function updatePlayerPosition() {
+            const x = Math.round(playerPos.x);
+            const z = Math.round(playerPos.z);
+
+            let terrainHeight = 0;
+            if (x >= 0 && x < worldSize && z >= 0 && z < worldSize && terrain[x] && terrain[x][z]) {
+                for (let y = terrain[x][z].length - 1; y >= 0; y--) {
+                    if (terrain[x][z][y] !== undefined) {
+                        terrainHeight = y + 1;
+                        break;
+                    }
+                }
+            }
+
+            playerPos.y = terrainHeight + 0.5;
+            player.position.copy(playerPos);
+
+            document.getElementById('playerPos').textContent =
+                `${playerPos.x.toFixed(1)}, ${playerPos.y.toFixed(1)}, ${playerPos.z.toFixed(1)}`;
+        }
+
+        function generateTerrain() {
+            const heightMap = [];
+            let blockCount = 0;
+
+            const rawHeightMap = [];
+            for (let x = 0; x < worldSize; x++) {
+                rawHeightMap[x] = [];
+                for (let z = 0; z < worldSize; z++) {
+                    const height = Math.floor(noise(x, z) * 4) + 2;
+                    rawHeightMap[x][z] = height;
+                }
+            }
+
+            for (let x = 0; x < worldSize; x++) {
+                heightMap[x] = [];
+                for (let z = 0; z < worldSize; z++) {
+                    let totalHeight = 0;
+                    let count = 0;
+
+                    for (let dx = -1; dx <= 1; dx++) {
+                        for (let dz = -1; dz <= 1; dz++) {
+                            const nx = x + dx;
+                            const nz = z + dz;
+
+                            if (nx >= 0 && nx < worldSize && nz >= 0 && nz < worldSize) {
+                                totalHeight += rawHeightMap[nx][nz];
+                                count++;
+                            }
+                        }
+                    }
+
+                    const smoothedHeight = Math.round(
+                        rawHeightMap[x][z] * 0.6 + (totalHeight / count) * 0.4
+                    );
+
+                    heightMap[x][z] = Math.max(2, smoothedHeight);
+                }
+            }
+
+            for(let x = 0; x < worldSize; x++) {
+                terrain[x] = [];
+                blockMeshes[x] = [];
+                for(let z = 0; z < worldSize; z++) {
+                    terrain[x][z] = [];
+                    blockMeshes[x][z] = [];
+                }
+            }
+
+            for (let x = 0; x < worldSize; x++) {
+                for (let z = 0; z < worldSize; z++) {
+                    const maxHeight = heightMap[x][z];
+
+                    for (let y = 0; y < maxHeight; y++) {
+                        let materialType;
+
+                        if (y < 2) {
+                            materialType = Math.random() < 0.5 ? MATERIALS.ROCK : MATERIALS.METAL;
+                        } else if (y < maxHeight - 2) {
+                            const weightedRandom = Math.random();
+                            if (weightedRandom < 0.2) materialType = MATERIALS.WOOD;
+                            else if (weightedRandom < 0.5) materialType = MATERIALS.ROCK;
+                            else materialType = MATERIALS.SOIL;
+                        } else {
+                            materialType = pickMaterialByFrequency();
+                        }
+
+                        if (y === maxHeight - 1) {
+                            materialType = MATERIALS.SOIL;
+                        }
+
+                        terrain[x][z][y] = materialType.id;
+
+                        const isVisible = isBlockVisibleInitial(x, y, z, heightMap);
+                        if (isVisible) {
+                            const blockMesh = createBlock(x, y, z, materialType);
+                            blockMeshes[x][z][y] = blockMesh;
+                        }
+                        blockCount++;
+                    }
+                }
+            }
+
+            document.getElementById('blockCount').textContent = blockCount;
+            updateVisibilityStats();
+        }
+
+        function noise(x, z) {
+            let value = 0;
+            let amplitude = 1;
+            let frequency = noiseScale;
+            let maxValue = 0;
+
+            let n1 = Math.sin(x * frequency * 3.14159 + z * frequency * 2.71828) * 0.5 + 0.5;
+            value += n1 * amplitude;
+            maxValue += amplitude;
+
+            amplitude *= 0.6;
+            frequency *= 2;
+
+            let n2 = Math.sin(x * frequency * 1.41421 + z * frequency * 1.73205) * 0.5 + 0.5;
+            value += n2 * amplitude;
+            maxValue += amplitude;
+
+            amplitude *= 0.5;
+            frequency *= 2;
+
+            let n3 = Math.sin(x * frequency * 2.23607 + z * frequency * 3.16228) * 0.5 + 0.5;
+            value += n3 * amplitude;
+            maxValue += amplitude;
+
+            return value / maxValue;
+        }
+
+        function pickMaterialByFrequency() {
+            let totalFrequency = 0;
+            for (const key in MATERIALS) {
+                totalFrequency += MATERIALS[key].frequency;
+            }
+
+            let random = Math.random() * totalFrequency;
+            for (const key in MATERIALS) {
+                random -= MATERIALS[key].frequency;
+                if (random <= 0) {
+                    return MATERIALS[key];
+                }
+            }
+            return MATERIALS.SOIL;
+        }
+
+        function isBlockVisibleInitial(x, y, z, heightMap) {
+            const currentHeight = heightMap[x][z];
+            if (y === currentHeight - 1) return true;
+
+            const neighbors = [
+                { nx: x - 1, nz: z },
+                { nx: x + 1, nz: z },
+                { nx: x, nz: z - 1 },
+                { nx: x, nz: z + 1 }
+            ];
+
+            for (const neighbor of neighbors) {
+                const { nx, nz } = neighbor;
+                if (nx < 0 || nx >= worldSize || nz < 0 || nz >= worldSize) {
+                    return true;
+                }
+                const neighborHeight = heightMap[nx][nz];
+                if (neighborHeight <= y) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function isBlockVisibleRuntime(x, y, z) {
+            if (x < 0 || x >= worldSize || y < 0 || y >= worldSize || z < 0 || z >= worldSize) {
+                return false;
+            }
+
+            const isAir = (terrain[x]?.[z]?.[y] === undefined);
+            if (isAir) return false;
+
+            const hasBlockAbove = (y + 1 < worldSize && terrain[x]?.[z]?.[y + 1] !== undefined);
+            if (!hasBlockAbove) return true;
+
+            const checkNeighbors = [
+                { dx: 1, dy: 0, dz: 0 }, { dx: -1, dy: 0, dz: 0 },
+                { dx: 0, dy: 0, dz: 1 }, { dx: 0, dy: 0, dz: -1 }
+            ];
+
+            for (const dir of checkNeighbors) {
+                const nx = x + dir.dx;
+                const ny = y + dir.dy;
+                const nz = z + dir.dz;
+
+                if (nx < 0 || nx >= worldSize || nz < 0 || nz >= worldSize ||
+                    terrain[nx]?.[nz]?.[ny] === undefined) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function createBlock(x, y, z, materialType) {
+            const geometry = new THREE.BoxGeometry(blockSize, blockSize, blockSize);
+            let blockMaterial;
+
+            if (materialType.id === MATERIALS.SOIL.id) {
+                const soilMaterials = [
+                    new THREE.MeshLambertMaterial({ color: materialType.color }),
+                    new THREE.MeshLambertMaterial({ color: materialType.color }),
+                    new THREE.MeshLambertMaterial({ color: materialType.topColor }),
+                    new THREE.MeshLambertMaterial({ color: materialType.color }),
+                    new THREE.MeshLambertMaterial({ color: materialType.color }),
+                    new THREE.MeshLambertMaterial({ color: materialType.color })
+                ];
+                blockMaterial = soilMaterials;
+            } else {
+                blockMaterial = new THREE.MeshLambertMaterial({ color: materialType.color });
+            }
+
+            const block = new THREE.Mesh(geometry, blockMaterial);
+            block.position.set(x, y, z);
+            block.castShadow = true;
+            block.receiveShadow = true;
+            scene.add(block);
+
+            return block;
+        }
+
+        function updateVisibilityStats() {
+            visibleBlocks = 0;
+            for (let x = 0; x < worldSize; x++) {
+                for (let z = 0; z < worldSize; z++) {
+                    for (let y = 0; y < blockMeshes[x][z].length; y++) {
+                        if (blockMeshes[x][z][y]) {
+                            visibleBlocks++;
+                        }
+                    }
+                }
+            }
+            document.getElementById('visibleCount').textContent = visibleBlocks;
+        }
+
+     // Update the inventory UI to include tools
+    function updateInventoryUI() {
+        const inventoryDiv = document.getElementById('materialInventory');
+        inventoryDiv.innerHTML = '';
+        
+        // Add materials
+        for (const materialKey in MATERIALS) {
+            const materialType = MATERIALS[materialKey];
+            const count = inventory[materialType.name] || 0;
+
+            const p = document.createElement('p');
+            p.textContent = `${materialType.name}: ${count}`;
+            p.dataset.materialId = materialType.id;
+
+            if (selectedMaterial && selectedMaterial.id === materialType.id) {
+                p.classList.add('selected');
+            }
+
+            p.addEventListener('click', () => {
+                if (!equippedTool) { // Can only select materials when no tool is equipped
+                    selectedMaterial = materialType;
+                    updateInventoryUI();
+                }
+            });
+
+            inventoryDiv.appendChild(p);
+        }
+
+        // Add tools section
+        const toolsHeader = document.createElement('h3');
+        toolsHeader.textContent = 'Tools';
+        inventoryDiv.appendChild(toolsHeader);
+
+        const pickaxeItem = document.createElement('p');
+        pickaxeItem.textContent = 'Pickaxe';
+        pickaxeItem.dataset.toolId = TOOLS.PICKAXE.id;
+        
+        if (equippedTool && equippedTool.id === TOOLS.PICKAXE.id) {
+            pickaxeItem.classList.add('selected');
+        }
+
+        pickaxeItem.addEventListener('click', () => {
+            if (equippedTool && equippedTool.id === TOOLS.PICKAXE.id) {
+                equippedTool = null; // Unequip
+            } else {
+                equippedTool = TOOLS.PICKAXE; // Equip
+                selectedMaterial = null; // Can't have both tool and material selected
+            }
+            updateInventoryUI();
+        });
+
+        inventoryDiv.appendChild(pickaxeItem);
+    }
+
+
+// setupControls SpriteAn
+    function destroyBlockInDirection() {
+        if (!equippedTool || equippedTool.id !== TOOLS.PICKAXE.id) {
+            console.log("You need to equip the pickaxe first!");
+            return;
+        }
+            if (playerLastMoveDirection.lengthSq() === 0) {
+                console.log("No last move direction. Move first to target a block.");
+                return;
+            }
+
+            const playerX = Math.round(playerPos.x);
+            const playerY = Math.round(playerPos.y - 0.5);
+            const playerZ = Math.round(playerPos.z);
+
+            const dirX = Math.round(playerLastMoveDirection.x);
+            const dirZ = Math.round(playerLastMoveDirection.z);
+
+            let targetBlockCoords = null;
+
+            let checkX = playerX + dirX;
+            let checkZ = playerZ + dirZ;
+            if (getBlockMeshAt(checkX, playerY, checkZ)) {
+                targetBlockCoords = { x: checkX, y: playerY, z: checkZ };
+            } else if (getBlockMeshAt(checkX, playerY + 1, checkZ)) {
+                targetBlockCoords = { x: checkX, y: playerY + 1, z: checkZ };
+            } else if (getBlockMeshAt(checkX, playerY - 1, checkZ)) {
+                targetBlockCoords = { x: checkX, y: playerY - 1, z: checkZ };
+            } else {
+                checkX = playerX + dirX;
+                checkZ = playerZ + dirZ;
+                const targetY_below = playerY - 1;
+                if (getBlockMeshAt(checkX, targetY_below, checkZ)) {
+                    targetBlockCoords = { x: checkX, y: targetY_below, z: checkZ };
+                }
+            }
+
+            if (targetBlockCoords) {
+                const { x, y, z } = targetBlockCoords;
+                const blockToDestroyMesh = blockMeshes[x][z][y];
+
+                const materialId = terrain[x][z][y];
+                let destroyedMaterialName = 'Unknown';
+                for (const key in MATERIALS) {
+                    if (MATERIALS[key].id === materialId) {
+                        destroyedMaterialName = MATERIALS[key].name;
+                        break;
+                    }
+                }
+
+                inventory[destroyedMaterialName] = (inventory[destroyedMaterialName] || 0) + 1;
+                updateInventoryUI();
+
+                scene.remove(blockToDestroyMesh);
+                blockToDestroyMesh.geometry.dispose();
+                if (Array.isArray(blockToDestroyMesh.material)) {
+                    blockToDestroyMesh.material.forEach(m => m.dispose());
+                } else {
+                    blockToDestroyMesh.material.dispose();
+                }
+
+                blockMeshes[x][z][y] = undefined;
+                terrain[x][z][y] = undefined;
+
+                console.log(`Block of ${destroyedMaterialName} at (${x}, ${y}, ${z}) destroyed.`);
+
+                updateSurroundingBlockVisibility(x, y, z);
+                updateVisibilityStats();
+            } else {
+                console.log("No destroyable block found in front of the player.");
+            }
+        }
+
+    function placeBlockInDirection() {
+        if (equippedTool) {
+            console.log("You can't place blocks while a tool is equipped!");
+            return;
+        }
+            if (playerLastMoveDirection.lengthSq() === 0) {
+                console.log("No last move direction. Move first to target a placement spot.");
+                return;
+            }
+            if (!selectedMaterial) {
+                console.log("No material selected for placement.");
+                return;
+            }
+            if ((inventory[selectedMaterial.name] || 0) <= 0) {
+                console.log(`No ${selectedMaterial.name} in inventory.`);
+                return;
+            }
+
+            const playerX = Math.round(playerPos.x);
+            const playerY = Math.round(playerPos.y - 0.5);
+            const playerZ = Math.round(playerPos.z);
+
+            const dirX = Math.round(playerLastMoveDirection.x);
+            const dirZ = Math.round(playerLastMoveDirection.z);
+
+            let targetX = playerX + dirX;
+            let targetY = playerY;
+            let targetZ = playerZ + dirZ;
+
+            let placementCandidates = [
+                { x: targetX, y: playerY, z: targetZ },
+                { x: targetX, y: playerY + 1, z: targetZ },
+                { x: targetX, y: playerY - 1, z: targetZ },
+                { x: playerX + dirX, y: playerY - 1, z: playerZ + dirZ }
+            ];
+
+            let placed = false;
+            for (const candidate of placementCandidates) {
+                const { x, y, z } = candidate;
+
+                if (x >= 0 && x < worldSize && y >= 0 && y < worldSize && z >= 0 && z < worldSize &&
+                    terrain[x]?.[z]?.[y] === undefined) {
+
+                    if (Math.round(playerPos.x) === x && Math.round(playerPos.y - 0.5) === y && Math.round(playerPos.z) === z) {
+                        continue;
+                    }
+                    if (Math.round(playerPos.x) === x && Math.round(playerPos.y + 0.5) === y && Math.round(playerPos.z) === z) {
+                        continue;
+                    }
+
+                    const newBlockMesh = createBlock(x, y, z, selectedMaterial);
+                    blockMeshes[x][z][y] = newBlockMesh;
+                    terrain[x][z][y] = selectedMaterial.id;
+
+                    inventory[selectedMaterial.name]--;
+                    updateInventoryUI();
+                    updateVisibilityStats();
+                    updateSurroundingBlockVisibility(x, y, z);
+                    console.log(`Placed ${selectedMaterial.name} block at (${x}, ${y}, ${z}).`);
+                    placed = true;
+                    break;
+                }
+            }
+
+            if (!placed) {
+                console.log("No empty space found for placement in that direction.");
+            }
+        }
+
+        function getBlockMeshAt(x, y, z) {
+            if (x < 0 || x >= worldSize || y < 0 || y >= worldSize || z < 0 || z >= worldSize) {
+                return undefined;
+            }
+            return blockMeshes[x]?.[z]?.[y];
+        }
+
+        function updateSurroundingBlockVisibility(changedX, changedY, changedZ) {
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    for (let dz = -1; dz <= 1; dz++) {
+                        const checkX = changedX + dx;
+                        const checkY = changedY + dy;
+                        const checkZ = changedZ + dz;
+
+                        if (checkX >= 0 && checkX < worldSize &&
+                            checkY >= 0 && checkY < worldSize &&
+                            checkZ >= 0 && checkZ < worldSize) {
+
+                            const materialId = terrain[checkX]?.[checkZ]?.[checkY];
+                            const currentMesh = blockMeshes[checkX]?.[checkZ]?.[checkY];
+
+                            if (materialId !== undefined) {
+                                const isCurrentlyVisible = (currentMesh !== undefined);
+                                const shouldBeVisible = isBlockVisibleRuntime(checkX, checkY, checkZ);
+
+                                if (shouldBeVisible && !isCurrentlyVisible) {
+                                    let materialToRender;
+                                    for (const key in MATERIALS) {
+                                        if (MATERIALS[key].id === materialId) {
+                                            materialToRender = MATERIALS[key];
+                                            break;
+                                        }
+                                    }
+                                    if (materialToRender) {
+                                        const newBlockMesh = createBlock(checkX, checkY, checkZ, materialToRender);
+                                        blockMeshes[checkX][checkZ][checkY] = newBlockMesh;
+                                    }
+                                } else if (!shouldBeVisible && isCurrentlyVisible) {
+                                    scene.remove(currentMesh);
+                                    currentMesh.geometry.dispose();
+                                    if (Array.isArray(currentMesh.material)) {
+                                        currentMesh.material.forEach(m => m.dispose());
+                                    } else {
+                                        currentMesh.material.dispose();
+                                    }
+                                    blockMeshes[checkX][checkZ][checkY] = undefined;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+//updatePlayer
+        function updateCameraPosition() {
+            const targetCameraX = playerPos.x + cameraOffset.x;
+            const targetCameraY = playerPos.y + cameraOffset.y;
+            const targetCameraZ = playerPos.z + cameraOffset.z;
+
+            camera.position.set(targetCameraX, targetCameraY, targetCameraZ);
+            camera.lookAt(playerPos.x, playerPos.y, playerPos.z);
+        }
+
+ function startMiningAnimation() {
+        if (playerFacing === 'front') {
+            currentAnimation = playerAnimationsWithPickaxe.miningFront;
+        } else {
+            currentAnimation = playerAnimationsWithPickaxe.miningBack;
+        }
+        
+        currentAnimation.play();
+        isMining = true;
+        miningAnimationComplete = false;
+    }
+
+  function setupControls() {
+        document.addEventListener('keydown', (event) => {
+    document.addEventListener('keydown', (event) => {
+        keys[event.code] = true;
+        
+        if (event.code === 'AltLeft' || event.code === 'AltRight') {
+            event.preventDefault();
+            
+            if (equippedTool && equippedTool.id === TOOLS.PICKAXE.id) {
+                startMiningAnimation(); // Use the new function
+                destroyBlockInDirection();
+            } else if (!equippedTool && selectedMaterial) {
+                placeBlockInDirection();
+            }
+        }
+    });
+
+        });
+            document.addEventListener('keyup', (event) => {
+                keys[event.code] = false;
+            });
+
+            renderer.domElement.addEventListener('wheel', (event) => {
+                event.preventDefault();
+                const zoomSpeed = 0.2;
+                const direction = event.deltaY > 0 ? 1 : -1;
+
+                const currentOffsetLength = cameraOffset.length();
+                let newOffsetLength = currentOffsetLength + direction * zoomSpeed;
+
+                newOffsetLength = Math.max(5, Math.min(50, newOffsetLength));
+
+                cameraOffset.normalize().multiplyScalar(newOffsetLength);
+
+                updateCameraPosition();
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const currentTime = performance.now();
+            const deltaTime = (currentTime - lastAnimationTime) / 1000;
+            lastAnimationTime = currentTime;
+            
+            handleMovement();
+            updatePlayerAnimation(deltaTime);
+            
+            renderer.render(scene, camera);
+        }
+
+        function handleMovement() {
+            const moveSpeed = 0.15;
+            let currentInputDirection = new THREE.Vector3(0, 0, 0);
+
+            const previousPlayerX = playerPos.x;
+            const previousPlayerZ = playerPos.z;
+
+            let isMoving = false;
+
+            if (keys['ArrowUp'] || keys['KeyW']) {
+                currentInputDirection.x += 1;
+                currentInputDirection.z += 1;
+                isMoving = true;
+            }
+            if (keys['ArrowDown'] || keys['KeyS']) {
+                currentInputDirection.x -= 1;
+                currentInputDirection.z -= 1;
+                isMoving = true;
+            }
+            if (keys['ArrowLeft'] || keys['KeyA']) {
+                currentInputDirection.x += 1;
+                currentInputDirection.z -= 1;
+                isMoving = true;
+            }
+            if (keys['ArrowRight'] || keys['KeyD']) {
+                currentInputDirection.x -= 1;
+                currentInputDirection.z += 1;
+                isMoving = true;
+            }
+
+            if (isMoving) {
+                if (currentInputDirection.lengthSq() > 0) {
+                    playerLastMoveDirection.copy(currentInputDirection).normalize();
+                }
+            }
+            document.getElementById('lastDirection').textContent =
+                playerLastMoveDirection.lengthSq() > 0 ?
+                `(${playerLastMoveDirection.x.toFixed(2)}, ${playerLastMoveDirection.z.toFixed(2)})` :
+                `None (Move to set direction)`;
+
+            if (currentInputDirection.lengthSq() > 0) {
+                playerPos.x += currentInputDirection.x * moveSpeed;
+                playerPos.z += currentInputDirection.z * moveSpeed;
+            }
+
+            playerPos.x = Math.max(0, Math.min(worldSize - 1, playerPos.x));
+            playerPos.z = Math.max(0, Math.min(worldSize - 1, playerPos.z));
+
+            if (previousPlayerX !== playerPos.x || previousPlayerZ !== playerPos.z) {
+                updatePlayerPosition();
+                updateCameraPosition();
+            }
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        init();
+    </script>
+</body>
+</html>
