@@ -1708,7 +1708,7 @@
                     depthWrite: false
                 });
                 
-                const bushPos = new THREE.Vector3(x + 0.5, topY + 1.5, z + 0.5);
+                const bushPos = new THREE.Vector3(x + 0.5, topY + 1.0, z + 0.5);
                 
                 // Create 9 copies for seamless wrapping
                 const bushGroup = new THREE.Group();
@@ -1717,7 +1717,7 @@
                         const bushMesh = new THREE.Mesh(bushGeo, bushMat.clone());
                         bushMesh.position.set(
                             x + 0.5 + offsetX * worldSize,
-                            topY + 1.5,
+                            topY + 1.0,
                             z + 0.5 + offsetZ * worldSize
                         );
                         bushGroup.add(bushMesh);
@@ -1896,7 +1896,7 @@
                 depthWrite: false
             });
             
-            const bushPos = new THREE.Vector3(targetX + 0.5, topY + 1.5, targetZ + 0.5);
+            const bushPos = new THREE.Vector3(targetX + 0.5, topY + 1.0, targetZ + 0.5);
             
             // Create 9 copies for seamless wrapping
             const bushGroup = new THREE.Group();
@@ -1905,7 +1905,7 @@
                     const bushMesh = new THREE.Mesh(bushGeo, bushMat.clone());
                     bushMesh.position.set(
                         targetX + 0.5 + offsetX * worldSize,
-                        topY + 1.5,
+                        topY + 1.0,
                         targetZ + 0.5 + offsetZ * worldSize
                     );
                     bushGroup.add(bushMesh);
@@ -3072,10 +3072,7 @@ function createTreeMesh(typeId) {
     // Apply a random tint so trees vary in color subtly
     mat.color.set(randomTreeTint());
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(0, 2.5, 0);   // center of tree at origin (adjusted for 2x size)
-    // Disable shadows on trees for better performance
-    mesh.castShadow = false;
-    mesh.receiveShadow = false;
+    mesh.position.set(0, 2.5, 0);   // center at 2.5, so bottom at 0 (tree is 5.0 tall)
     const group = new THREE.Group();
     group.add(mesh);
     return group;
