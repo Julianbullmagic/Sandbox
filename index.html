@@ -379,7 +379,7 @@
         // Game variables
         let scene, camera, renderer;
         let player, terrain = [], blockMeshes = [], trees = [];
-        let worldSize = 20;
+        let worldSize = 60;
         let blockSize = 1;
         
         // Material caching for better performance
@@ -387,8 +387,9 @@
         let cachedRockMaterial = null;
         let cachedMetalMaterial = null;
         let cachedWoodMaterial = null;
+        let cachedWaterMaterial = null;
         let noiseScale = 0.05;
-        let playerPos = new THREE.Vector3(10, 0, 10); // Center of 20x20 world
+        let playerPos = new THREE.Vector3(30, 0, 30); // Center of 60x60 world
         let keys = {};
         let cameraAngle = 0;        // radians around the player
         const rotationSpeed = 0.03; // radians per key-press
@@ -397,7 +398,8 @@
         let selectedMaterial = null;
         const TOOLS = {
             PICKAXE: { id: 0, name: 'Pickaxe' },
-            AXE: { id: 1, name: 'Axe' }
+            AXE: { id: 1, name: 'Axe' },
+            FISHING_ROD: { id: 2, name: 'Fishing Rod' }
         };
         let equippedTool = null;
         let playerAnimationsWithPickaxe = {
@@ -417,10 +419,24 @@
             cuttingFront: null,
             cuttingBack: null
         };
+        let playerAnimationsWithFishingRod = {
+            idleFront: null,
+            idleBack: null,
+            runFront: null,
+            runBack: null,
+            castingFront: null,
+            waitingFront: null,
+            fishBiteFront: null,
+            catchingFront: null
+        };
         let isUsingTool = false;
         let toolAnimationComplete = true;
         let plantingSeeds = false;
         let plantingBushSeeds = false;
+        let isFishing = false;
+        let fishingStartTime = 0;
+        let fishingWaitTime = 0;
+        let fishingState = 'idle'; // 'idle', 'casting', 'waiting', 'bite', 'catching'
         let globalTreeTexture; // Store tree texture globally
         let globalTreeWithFruitTexture; // Store tree with fruit texture globally
         let lastGrowthUpdate = 0; // For tree growth timing
@@ -447,7 +463,7 @@
         let lastNightDamageTime = 0;
         
         // Material textures
-        let grassTexture, soilTexture, rockTexture, metalTexture, woodTexture;
+        let grassTexture, soilTexture, rockTexture, metalTexture, woodTexture, waterTexture;
         
         // Bushes
         let bushes = [];
@@ -506,7 +522,8 @@
             SOIL: { id: 0, name: 'Soil', color: 0x8B4513, topColor: 0x228B22, frequency: 4 },
             ROCK: { id: 1, name: 'Rock', color: 0x696969, frequency: 3 },
             METAL: { id: 3, name: 'Metal', color: 0xB0C4DE, frequency: 1 },
-            WOOD: { id: 2, name: 'Wood', color: 0x8B4513, frequency: 0 } // Wood material added
+            WOOD: { id: 2, name: 'Wood', color: 0x8B4513, frequency: 0 }, // Wood material added
+            WATER: { id: 4, name: 'Water', color: 0x006994, frequency: 0 } // Water material added
         };
 
         // Animation variables
@@ -735,6 +752,15 @@
             const cuttingFrontTexture = await loadTexture('https://res.cloudinary.com/julianbullmagic/image/upload/v1749555186/cutting_tree_front_enon7m.png');
             const cuttingBackTexture = await loadTexture('https://res.cloudinary.com/julianbullmagic/image/upload/v1749555180/cutting_tree_back_huunqw.png');
 
+            // Load fishing animations
+            const idleFishingFrontTexture = await loadTexture('https://res.cloudinary.com/dfksh5mnb/image/upload/v1703651832/idle_fishing_front_aupnm2.png');
+            const idleWithFishingRodFrontTexture = await loadTexture('https://res.cloudinary.com/dfksh5mnb/image/upload/v1703651848/idle_whit_fishing_rod_front_yamiem.png');
+            const runWithFishingRodFrontTexture = await loadTexture('https://res.cloudinary.com/dfksh5mnb/image/upload/v1703651894/run_whit_fishing_rod_front_cgzcfn.png');
+            const throwingFishingRodFrontTexture = await loadTexture('https://res.cloudinary.com/dfksh5mnb/image/upload/v1703651912/throwing_fishing_rod_front_ritizd.png');
+            const fishBitTheLineFrontTexture = await loadTexture('https://res.cloudinary.com/dfksh5mnb/image/upload/v1703651826/fish_bit_the_line_front_ivoqvr.png');
+            const strugglingWithFishFrontTexture = await loadTexture('https://res.cloudinary.com/dfksh5mnb/image/upload/v1703651910/struggling_whit_the_fish_front_uhh8oa.png');
+            const catchingTheFishFrontTexture = await loadTexture('https://res.cloudinary.com/dfksh5mnb/image/upload/v1703651775/catching_the_fish_front_zqraqm.png');
+
             // Create regular animations
             playerAnimations.idleFront = new SpriteAnimator(idleFrontTexture, 8, 1, 0.1);
             playerAnimations.idleBack = new SpriteAnimator(idleBackTexture, 8, 1, 0.1);
@@ -756,6 +782,16 @@
             playerAnimationsWithAxe.runBack = new SpriteAnimator(runAxeBackTexture, 8, 1, 0.1);
             playerAnimationsWithAxe.cuttingFront = new SpriteAnimator(cuttingFrontTexture, 8, 1, 0.05, false);
             playerAnimationsWithAxe.cuttingBack = new SpriteAnimator(cuttingBackTexture, 8, 1, 0.05, false);
+            
+            // Create fishing animations
+            playerAnimationsWithFishingRod.idleFront = new SpriteAnimator(idleWithFishingRodFrontTexture, 8, 1, 0.1);
+            playerAnimationsWithFishingRod.idleBack = new SpriteAnimator(idleWithFishingRodFrontTexture, 8, 1, 0.1); // Use front for back
+            playerAnimationsWithFishingRod.runFront = new SpriteAnimator(runWithFishingRodFrontTexture, 8, 1, 0.1);
+            playerAnimationsWithFishingRod.runBack = new SpriteAnimator(runWithFishingRodFrontTexture, 8, 1, 0.1); // Use front for back
+            playerAnimationsWithFishingRod.castingFront = new SpriteAnimator(throwingFishingRodFrontTexture, 8, 1, 0.2, false); // Slower animation so it's more visible
+            playerAnimationsWithFishingRod.waitingFront = new SpriteAnimator(idleFishingFrontTexture, 8, 1, 0.1);
+            playerAnimationsWithFishingRod.fishBiteFront = new SpriteAnimator(fishBitTheLineFrontTexture, 8, 1, 0.2, false); // Slower animation so it's more visible
+            playerAnimationsWithFishingRod.catchingFront = new SpriteAnimator(catchingTheFishFrontTexture, 8, 1, 0.2, false); // Slower animation so it's more visible
             
             // Load tree texture - downsampled 4x for performance
             const treeTexture = await loadTextureDownsampled('https://res.cloudinary.com/julianbullmagic/image/upload/v1749694431/set-variety-trees-transparent-background_vr8wak.png', 4);
@@ -805,6 +841,13 @@
             woodTexture.repeat.set(1, 1);
             woodTexture.minFilter = THREE.NearestFilter;
             woodTexture.magFilter = THREE.NearestFilter;
+            
+            waterTexture = textureLoader.load('https://res.cloudinary.com/dfksh5mnb/image/upload/v1760436450/R_1_jxujzz.jpg');
+            waterTexture.wrapS = THREE.RepeatWrapping;
+            waterTexture.wrapT = THREE.RepeatWrapping;
+            waterTexture.repeat.set(1, 1);
+            waterTexture.minFilter = THREE.NearestFilter;
+            waterTexture.magFilter = THREE.NearestFilter;
             
             generateTerrain();
             generateTrees(treeTexture);
@@ -903,15 +946,15 @@
         }
         
         function createRainSystem() {
-            const particleCount = 1000;
+            const particleCount = 2000; // More particles for larger world
             const particles = new THREE.BufferGeometry();
             const positions = new Float32Array(particleCount * 3);
             
-            // Initialize rain particles above player area
+            // Initialize rain particles above player area - adjusted for larger world
             for (let i = 0; i < particleCount; i++) {
-                positions[i * 3] = (Math.random() - 0.5) * worldSize * 1.5;
+                positions[i * 3] = (Math.random() - 0.5) * worldSize * 0.8; // Smaller spread for performance
                 positions[i * 3 + 1] = Math.random() * 20 + 10;
-                positions[i * 3 + 2] = (Math.random() - 0.5) * worldSize * 1.5;
+                positions[i * 3 + 2] = (Math.random() - 0.5) * worldSize * 0.8;
             }
             
             particles.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -959,9 +1002,9 @@
                     // Reset to top if below ground
                     if (positions[i + 1] < 0) {
                         positions[i + 1] = 20;
-                        // Re-center around player
-                        positions[i] = playerPos.x + (Math.random() - 0.5) * 30;
-                        positions[i + 2] = playerPos.z + (Math.random() - 0.5) * 30;
+                        // Re-center around player - adjusted for larger world
+                        positions[i] = playerPos.x + (Math.random() - 0.5) * 40;
+                        positions[i + 2] = playerPos.z + (Math.random() - 0.5) * 40;
                     }
                 }
                 
@@ -1103,6 +1146,20 @@
                 showNotification("Used medicinal herb! +25 HP");
             } else {
                 showNotification("No medicinal herbs!");
+            }
+        }
+        
+        function eatFish() {
+            if ((inventory['Fish'] || 0) > 0) {
+                inventory['Fish']--;
+                hunger = Math.min(100, hunger + 40);
+                health = Math.min(100, health + 10);
+                updateStatsUI();
+                updateInventoryUI();
+                saveGameState();
+                showNotification("Ate fish! +40% hunger, +10 HP");
+            } else {
+                showNotification("No fish to eat!");
             }
         }
 
@@ -1659,7 +1716,7 @@
         }
 
         function generateBushes() {
-            const numBushes = 100;
+            const numBushes = 300; // Triple the bushes for 3x larger world
             const placedPositions = new Set();
             
             for (let i = 0; i < numBushes; i++) {
@@ -1931,7 +1988,7 @@
         }
 
      function generateTrees(treeTexture) {
-    const numTrees = 200; // Reduced from 500 for better performance
+    const numTrees = 600; // Triple the trees for 3x larger world
     const placedPositions = new Set();
     const minTreeDistance = 2; // Minimum distance between trees
 
@@ -2028,8 +2085,136 @@
 }
 //createTreeMesh
         function createPlayer() {
+            // Find a suitable spawn location away from water
+            // Start at a random position instead of always center
+            let spawnX = Math.floor(Math.random() * worldSize);
+            let spawnZ = Math.floor(Math.random() * worldSize);
+            let foundSuitableSpawn = false;
+            let attempts = 0;
+            const maxAttempts = 200; // Increased attempts for better success rate
+            
+            // Search for a suitable spawn location
+            while (!foundSuitableSpawn && attempts < maxAttempts) {
+                // Check a spiral pattern from the random starting point
+                const angle = (attempts * 0.5) % (Math.PI * 2);
+                const radius = Math.floor(attempts / 6) + 1;
+                
+                spawnX = Math.floor(spawnX + Math.cos(angle) * radius);
+                spawnZ = Math.floor(spawnZ + Math.sin(angle) * radius);
+                
+                // Wrap coordinates
+                spawnX = ((spawnX % worldSize) + worldSize) % worldSize;
+                spawnZ = ((spawnZ % worldSize) + worldSize) % worldSize;
+                
+                // Find the terrain height at this position
+                let groundY = 0;
+                if (terrain[spawnX] && terrain[spawnX][spawnZ]) {
+                    for (let y = worldSize - 1; y >= 0; y--) {
+                        if (terrain[spawnX][spawnZ][y] !== undefined) {
+                            groundY = y;
+                            break;
+                        }
+                    }
+                }
+                
+                // Check if this position is suitable (not on water and has solid ground)
+                let isNearWater = false;
+                let isOnWater = false;
+                
+                // Check if the spawn position itself is water
+                if (getTerrainBlock(spawnX, spawnZ, groundY) === MATERIALS.WATER.id) {
+                    isOnWater = true;
+                }
+                
+                // Check for water in a larger area around the spawn position
+                for (let dx = -3; dx <= 3; dx++) {
+                    for (let dz = -3; dz <= 3; dz++) {
+                        const checkX = spawnX + dx;
+                        const checkZ = spawnZ + dz;
+                        const wrappedCheckX = ((checkX % worldSize) + worldSize) % worldSize;
+                        const wrappedCheckZ = ((checkZ % worldSize) + worldSize) % worldSize;
+                        
+                        // Check for water at ground level or one level above
+                        if (getTerrainBlock(wrappedCheckX, wrappedCheckZ, groundY) === MATERIALS.WATER.id ||
+                            getTerrainBlock(wrappedCheckX, wrappedCheckZ, groundY + 1) === MATERIALS.WATER.id) {
+                            isNearWater = true;
+                            break;
+                        }
+                    }
+                    if (isNearWater) break;
+                }
+                
+                // If not on water, not near water, and on solid ground, this is a good spawn
+                if (!isOnWater && !isNearWater && terrain[spawnX] && terrain[spawnX][spawnZ] &&
+                    terrain[spawnX][spawnZ][groundY] === MATERIALS.SOIL.id) {
+                    foundSuitableSpawn = true;
+                    playerPos.set(spawnX + 0.5, groundY + 2.0, spawnZ + 0.5); // +2.0 to stand on top of ground
+                    console.log(`Found suitable spawn at (${spawnX}, ${groundY}, ${spawnZ})`);
+                }
+                
+                attempts++;
+            }
+            
+            // If we couldn't find a suitable spawn, try a more aggressive search
+            if (!foundSuitableSpawn) {
+                console.warn("Could not find suitable spawn location with first method, trying alternative");
+                attempts = 0;
+                
+                // Try a grid search pattern
+                for (let gridX = 10; gridX < worldSize - 10 && !foundSuitableSpawn; gridX += 10) {
+                    for (let gridZ = 10; gridZ < worldSize - 10 && !foundSuitableSpawn; gridZ += 10) {
+                        // Find the terrain height at this grid position
+                        let groundY = 0;
+                        if (terrain[gridX] && terrain[gridX][gridZ]) {
+                            for (let y = worldSize - 1; y >= 0; y--) {
+                                if (terrain[gridX][gridZ][y] !== undefined) {
+                                    groundY = y;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // Check if this position is suitable
+                        if (getTerrainBlock(gridX, gridZ, groundY) !== MATERIALS.WATER.id &&
+                            terrain[gridX] && terrain[gridX][gridZ] &&
+                            terrain[gridX][gridZ][groundY] === MATERIALS.SOIL.id) {
+                            
+                            // Check for water in a 3x3 area
+                            let isNearWater = false;
+                            for (let dx = -2; dx <= 2; dx++) {
+                                for (let dz = -2; dz <= 2; dz++) {
+                                    const checkX = gridX + dx;
+                                    const checkZ = gridZ + dz;
+                                    const wrappedCheckX = ((checkX % worldSize) + worldSize) % worldSize;
+                                    const wrappedCheckZ = ((checkZ % worldSize) + worldSize) % worldSize;
+                                    
+                                    if (getTerrainBlock(wrappedCheckX, wrappedCheckZ, groundY) === MATERIALS.WATER.id ||
+                                        getTerrainBlock(wrappedCheckX, wrappedCheckZ, groundY + 1) === MATERIALS.WATER.id) {
+                                        isNearWater = true;
+                                        break;
+                                    }
+                                }
+                                if (isNearWater) break;
+                            }
+                            
+                            if (!isNearWater) {
+                                foundSuitableSpawn = true;
+                                playerPos.set(gridX + 0.5, groundY + 2.0, gridZ + 0.5);
+                                console.log(`Found suitable spawn at grid position (${gridX}, ${groundY}, ${gridZ})`);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Last resort: use a default elevated position
+            if (!foundSuitableSpawn) {
+                console.error("Could not find any suitable spawn location, using default elevated position");
+                playerPos.set(worldSize / 2, 8.0, worldSize / 2); // Higher default position
+            }
+            
             // Create a plane geometry instead of sprite to prevent transparency issues
-            const geometry = new THREE.PlaneGeometry(1.8, 1.59);  // 3x bigger: Width: 1.8, Height: 1.59
+            const geometry = new THREE.PlaneGeometry(1.8, 1.59);  // Normal size for non-fishing animations
             const spriteMaterial = new THREE.MeshBasicMaterial({
                 map: playerAnimations.idleFront.texture,
                 transparent: true,
@@ -2042,6 +2227,9 @@
             playerSprite = new THREE.Mesh(geometry, spriteMaterial);
             playerSprite.scale.set(1, 1, 1);
             playerSprite.position.copy(playerPos);
+            
+            // Store original scale to prevent shrinking during animations
+            playerSprite.userData.originalScale = new THREE.Vector3(1, 1, 1);
             
             currentAnimation = playerAnimations.idleFront;
             currentAnimation.play();
@@ -2064,12 +2252,14 @@
                         animationSet = playerAnimationsWithPickaxe;
                     } else if (equippedTool && equippedTool.id === TOOLS.AXE.id) {
                         animationSet = playerAnimationsWithAxe;
+                    } else if (equippedTool && equippedTool.id === TOOLS.FISHING_ROD.id) {
+                        animationSet = playerAnimationsWithFishingRod;
                     } else {
                         animationSet = playerAnimations;
                     }
                     
-                    currentAnimation = playerFacing === 'front' ? 
-                        animationSet.idleFront : 
+                    currentAnimation = playerFacing === 'front' ?
+                        animationSet.idleFront :
                         animationSet.idleBack;
                     currentAnimation.play();
                 }
@@ -2078,9 +2268,32 @@
                 return;
             }
 
-            const isMoving = keys['ArrowUp'] || keys['ArrowDown'] || 
-                            keys['ArrowLeft'] || keys['ArrowRight'] || 
-                            keys['KeyW'] || keys['KeyS'] || 
+            // Handle fishing animations
+            if (isFishing && equippedTool && equippedTool.id === TOOLS.FISHING_ROD.id) {
+                currentAnimation.update(deltaTime);
+                
+                // Check if current animation completed and handle state transitions
+                if (currentAnimation.completed) {
+                    if (fishingState === 'casting') {
+                        fishingState = 'waiting';
+                        currentAnimation = playerAnimationsWithFishingRod.waitingFront;
+                        currentAnimation.play();
+                    } else if (fishingState === 'catching') {
+                        fishingState = 'idle';
+                        currentAnimation = playerFacing === 'front' ?
+                            playerAnimationsWithFishingRod.idleFront :
+                            playerAnimationsWithFishingRod.idleBack;
+                        currentAnimation.play();
+                    }
+                }
+                
+                updatePlayerSpriteTexture();
+                return;
+            }
+
+            const isMoving = keys['ArrowUp'] || keys['ArrowDown'] ||
+                            keys['ArrowLeft'] || keys['ArrowRight'] ||
+                            keys['KeyW'] || keys['KeyS'] ||
                             keys['KeyA'] || keys['KeyD'];
             
             // Update facing and left/right flip based on movement (camera-relative)
@@ -2120,6 +2333,8 @@
                 animationSet = playerAnimationsWithPickaxe;
             } else if (equippedTool && equippedTool.id === TOOLS.AXE.id) {
                 animationSet = playerAnimationsWithAxe;
+            } else if (equippedTool && equippedTool.id === TOOLS.FISHING_ROD.id) {
+                animationSet = playerAnimationsWithFishingRod;
             } else {
                 animationSet = playerAnimations;
             }
@@ -2139,6 +2354,41 @@
             
             currentAnimation.update(deltaTime);
             updatePlayerSpriteTexture();
+            
+            // Ensure player sprite maintains original scale during all animations
+            if (playerSprite && !playerSprite.userData.isFishingScaled) {
+                playerSprite.scale.set(1, 1, 1);
+            }
+            
+            // Adjust geometry size for specific fishing animations to make them twice as big
+            // These animations should be twice as big:
+            // - castingFront (throwing_fishing_rod_front)
+            // - waitingFront (idle_fishing_front)
+            // - fishBiteFront (struggling_with_the_fish_front)
+            // - catchingFront (catching_the_fish_front)
+            if (playerSprite && (currentAnimation === playerAnimationsWithFishingRod.castingFront ||
+                                currentAnimation === playerAnimationsWithFishingRod.waitingFront ||
+                                currentAnimation === playerAnimationsWithFishingRod.fishBiteFront ||
+                                currentAnimation === playerAnimationsWithFishingRod.catchingFront)) {
+                // These specific fishing animations should be twice as big
+                if (!playerSprite.userData.isFishingScaled) {
+                    playerSprite.userData.isFishingScaled = true;
+                    
+                    // Store original geometry if not already stored
+                    if (!playerSprite.userData.originalGeometry) {
+                        playerSprite.userData.originalGeometry = playerSprite.geometry;
+                    }
+                    
+                    // Create a larger geometry (2x the original size)
+                    playerSprite.geometry = new THREE.PlaneGeometry(3.6, 3.18);  // 2x the normal size
+                }
+            } else if (playerSprite && playerSprite.userData.isFishingScaled) {
+                // Restore original geometry for non-fishing animations
+                playerSprite.userData.isFishingScaled = false;
+                if (playerSprite.userData.originalGeometry) {
+                    playerSprite.geometry = playerSprite.userData.originalGeometry;
+                }
+            }
         }
         
         function updatePlayerSpriteTexture() {
@@ -2224,7 +2474,7 @@
             for (let x = 0; x < worldSize; x++) {
                 rawHeightMap[x] = [];
                 for (let z = 0; z < worldSize; z++) {
-                    const height = Math.floor(noise(x, z) * 4) + 2;
+                    const height = Math.floor(noise(x, z) * 8) + 2; // Restored original height range with more variation
                     rawHeightMap[x][z] = height;
                 }
             }
@@ -2250,7 +2500,7 @@
                         rawHeightMap[x][z] * 0.6 + (totalHeight / count) * 0.4
                     );
 
-                    heightMap[x][z] = Math.max(2, smoothedHeight);
+                    heightMap[x][z] = Math.max(2, smoothedHeight); // Restored original minimum height
                 }
             }
 
@@ -2292,6 +2542,22 @@
                             blockMeshes[x][z][y] = blockMesh;
                         }
                         blockCount++;
+                    }
+                    
+                    // Add surface water in low areas after terrain generation
+                    const waterTableLevel = 3; // Lowered water level to reduce coverage
+                    if (maxHeight <= waterTableLevel) {
+                        // This is a low area, create surface water
+                        const waterY = waterTableLevel; // Water surface at level 3
+                        
+                        // Only add water if there isn't already a block at this level
+                        if (!terrain[x][z][waterY]) {
+                            terrain[x][z][waterY] = MATERIALS.WATER.id;
+                            
+                            // Create water block mesh
+                            const waterMesh = createBlock(x, waterY, z, MATERIALS.WATER);
+                            blockMeshes[x][z][waterY] = waterMesh;
+                        }
                     }
                 }
             }
@@ -2434,6 +2700,15 @@
                     cachedWoodMaterial = new THREE.MeshLambertMaterial({ map: woodTexture });
                 }
                 blockMaterial = cachedWoodMaterial;
+            } else if (materialType.id === MATERIALS.WATER.id) {
+                if (!cachedWaterMaterial) {
+                    cachedWaterMaterial = new THREE.MeshLambertMaterial({
+                        map: waterTexture,
+                        transparent: true,
+                        opacity: 0.8
+                    });
+                }
+                blockMaterial = cachedWaterMaterial;
             } else {
                 blockMaterial = new THREE.MeshLambertMaterial({ color: materialType.color });
             }
@@ -2490,7 +2765,7 @@
             const resourceDiv = document.getElementById('resourceInventory');
             resourceDiv.innerHTML = '';
             
-            const hasResources = inventory['Wood'] || inventory['Seeds'] || inventory['Bush Seeds'] || inventory['Fruit'] || inventory['Medicinal Herb'];
+            const hasResources = inventory['Wood'] || inventory['Seeds'] || inventory['Bush Seeds'] || inventory['Fruit'] || inventory['Medicinal Herb'] || inventory['Fish'];
             
             if (hasResources) {
                 if (inventory['Wood']) {
@@ -2600,6 +2875,30 @@
                     });
                     resourceDiv.appendChild(herbItem);
                 }
+                
+                if (inventory['Fish']) {
+                    const fishItem = document.createElement('p');
+                    fishItem.textContent = `Fish: ${inventory['Fish']} (Click to eat)`;
+                    fishItem.style.cursor = 'pointer';
+                    fishItem.style.padding = '8px 12px';
+                    fishItem.style.margin = '5px 0';
+                    fishItem.style.borderRadius = '5px';
+                    fishItem.style.background = 'rgba(255, 255, 255, 0.1)';
+                    fishItem.style.transition = 'all 0.2s';
+                    
+                    fishItem.addEventListener('mouseenter', () => {
+                        fishItem.style.background = 'rgba(76, 175, 80, 0.3)';
+                    });
+                    
+                    fishItem.addEventListener('mouseleave', () => {
+                        fishItem.style.background = 'rgba(255, 255, 255, 0.1)';
+                    });
+                    
+                    fishItem.addEventListener('click', () => {
+                        eatFish();
+                    });
+                    resourceDiv.appendChild(fishItem);
+                }
             } else {
                 resourceDiv.innerHTML = '<p>No resources</p>';
             }
@@ -2651,6 +2950,29 @@
             });
 
             toolDiv.appendChild(axeItem);
+
+            // Fishing rod item
+            const fishingRodItem = document.createElement('p');
+            fishingRodItem.textContent = 'Fishing Rod';
+            fishingRodItem.dataset.toolId = TOOLS.FISHING_ROD.id;
+            
+            if (equippedTool && equippedTool.id === TOOLS.FISHING_ROD.id) {
+                fishingRodItem.classList.add('selected');
+            }
+
+            fishingRodItem.addEventListener('click', () => {
+                if (equippedTool && equippedTool.id === TOOLS.FISHING_ROD.id) {
+                    equippedTool = null;
+                    stopFishing();
+                } else {
+                    equippedTool = TOOLS.FISHING_ROD.id === 2 ? TOOLS.FISHING_ROD : { id: 2, name: 'Fishing Rod' };
+                    selectedMaterial = null;
+                    plantingSeeds = false;
+                }
+                updateInventoryUI();
+            });
+
+            toolDiv.appendChild(fishingRodItem);
             
             // Plant button state
             const plantButton = document.getElementById('plantButton');
@@ -3482,15 +3804,146 @@ function rotateCamera(dir) {
             }
         }
 
+        // Fishing mechanics functions
+        function isNearWater() {
+            const playerX = Math.floor(playerPos.x);
+            const playerZ = Math.floor(playerPos.z);
+            const playerFeetY = Math.floor(playerPos.y - 1.0);
+            
+            // Check in a 3x3 area around the player for water
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dz = -1; dz <= 1; dz++) {
+                    const checkX = playerX + dx;
+                    const checkZ = playerZ + dz;
+                    
+                    // Check for water at feet level or one level below
+                    for (let dy = -1; dy <= 0; dy++) {
+                        const checkY = playerFeetY + dy;
+                        const block = getTerrainBlock(checkX, checkZ, checkY);
+                        if (block === MATERIALS.WATER.id) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+        
+        function startFishing() {
+            if (isFishing) {
+                stopFishing();
+                return;
+            }
+            
+            if (!isNearWater()) {
+                showNotification("You need to be near water to fish!");
+                return;
+            }
+            
+            isFishing = true;
+            fishingState = 'casting';
+            fishingStartTime = Date.now();
+            
+            // Start casting animation
+            currentAnimation = playerAnimationsWithFishingRod.castingFront;
+            currentAnimation.play();
+            
+            showNotification("Casting line...");
+            
+            // After casting animation completes, start waiting
+            setTimeout(() => {
+                if (isFishing && fishingState === 'casting') {
+                    fishingState = 'waiting';
+                    currentAnimation = playerAnimationsWithFishingRod.waitingFront;
+                    currentAnimation.play();
+                    
+                    // Set random wait time between 5-20 seconds
+                    fishingWaitTime = 5000 + Math.random() * 15000; // 5-20 seconds
+                    showNotification("Waiting for a fish to bite...");
+                }
+            }, 800); // Casting animation duration
+        }
+        
+        function stopFishing() {
+            isFishing = false;
+            fishingState = 'idle';
+            
+            // Return to idle animation
+            if (equippedTool && equippedTool.id === TOOLS.FISHING_ROD.id) {
+                currentAnimation = playerFacing === 'front' ?
+                    playerAnimationsWithFishingRod.idleFront :
+                    playerAnimationsWithFishingRod.idleBack;
+                currentAnimation.play();
+            }
+            
+            showNotification("Stopped fishing");
+        }
+        
+        function checkForFish() {
+            if (!isFishing || fishingState !== 'waiting') return;
+            
+            const now = Date.now();
+            const timeSinceStart = now - fishingStartTime;
+            
+            if (timeSinceStart >= fishingWaitTime) {
+                // Fish bite!
+                fishingState = 'bite';
+                currentAnimation = playerAnimationsWithFishingRod.fishBiteFront;
+                currentAnimation.play();
+                
+                showNotification("A fish bit! Quick!");
+                
+                // Give player 2 seconds to react
+                setTimeout(() => {
+                    if (isFishing && fishingState === 'bite') {
+                        // Player missed the fish
+                        fishingState = 'waiting';
+                        currentAnimation = playerAnimationsWithFishingRod.waitingFront;
+                        currentAnimation.play();
+                        
+                        // Reset wait time
+                        fishingWaitTime = 5000 + Math.random() * 15000;
+                        fishingStartTime = Date.now();
+                        showNotification("The fish got away! Waiting again...");
+                    }
+                }, 2000);
+            }
+        }
+        
+        function catchFish() {
+            if (!isFishing || fishingState !== 'bite') {
+                showNotification("No fish to catch!");
+                return;
+            }
+            
+            fishingState = 'catching';
+            currentAnimation = playerAnimationsWithFishingRod.catchingFront;
+            currentAnimation.play();
+            
+            showNotification("Caught a fish!");
+            
+            // Add fish to inventory
+            inventory['Fish'] = (inventory['Fish'] || 0) + 1;
+            updateInventoryUI();
+            saveGameState();
+            
+            // Return to idle after catching animation
+            setTimeout(() => {
+                if (isFishing) {
+                    stopFishing();
+                }
+            }, 1000);
+        }
+        
         function setupControls() {
             document.addEventListener('keydown', (event) => {
                 keys[event.code] = true;
                     if (event.code === 'KeyQ'){
                         rotateCamera(-1);
-                    } 
+                    }
     if (event.code === 'KeyE'){
 rotateCamera( 1)
-    } 
+    }
     //handleMovement
                 if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') {
                     event.preventDefault();
@@ -3501,6 +3954,8 @@ rotateCamera( 1)
                     } else if (equippedTool && equippedTool.id === TOOLS.AXE.id) {
                         startToolAnimation();
                         cutTreeInDirection();
+                    } else if (equippedTool && equippedTool.id === TOOLS.FISHING_ROD.id) {
+                        startFishing();
                     } else if (!equippedTool && selectedMaterial) {
                         placeBlockInDirection();
                     } else if (plantingSeeds) {
@@ -3515,6 +3970,8 @@ rotateCamera( 1)
                     if (equippedTool && equippedTool.id === TOOLS.PICKAXE.id) {
                         startToolAnimation();
                         destroyBlockInDirection();
+                    } else if (equippedTool && equippedTool.id === TOOLS.FISHING_ROD.id) {
+                        catchFish();
                     }
                 } else if (event.code === 'AltLeft' || event.code === 'AltRight') {
                     event.preventDefault();
@@ -3614,8 +4071,8 @@ renderer.domElement.addEventListener('wheel', (event) => {
                 try {
                     const gameState = JSON.parse(saved);
                     
-                    // Restore player position
-                    playerPos.set(gameState.playerPos.x, gameState.playerPos.y, gameState.playerPos.z);
+                    // Don't restore player position - let createPlayer() generate a new spawn location
+                    // This prevents spawning on water when the page refreshes
                     
                     // Restore stats
                     inventory = gameState.inventory || {};
@@ -3629,9 +4086,9 @@ renderer.domElement.addEventListener('wheel', (event) => {
                     // Update UI
                     updateInventoryUI();
                     updateStatsUI();
-                    updatePlayerPosition();
+                    // Don't call updatePlayerPosition() here - it will be called after createPlayer()
                     
-                    console.log("Game state loaded from localStorage");
+                    console.log("Game state loaded from localStorage (player position reset for new spawn)");
                 } catch (e) {
                     console.error("Failed to load game state:", e);
                 }
@@ -3669,11 +4126,16 @@ renderer.domElement.addEventListener('wheel', (event) => {
         }
 
        function handleMovement() {
+    // Prevent movement while fishing (except during casting)
+    if (isFishing && fishingState !== 'casting') {
+        return;
+    }
+    
     const moveSpeed = 0.18; // Increased from 0.15 to outrun bears (0.08)
     const forward = new THREE.Vector3();
     const right   = new THREE.Vector3();
 
-    // camera’s forward & right vectors on the XZ plane
+    // camera's forward & right vectors on the XZ plane
     forward.subVectors(camera.position, playerPos).normalize();
     forward.y = 0;                 // stay on the ground
     forward.normalize();
@@ -3686,7 +4148,7 @@ renderer.domElement.addEventListener('wheel', (event) => {
     if (keys['KeyW'] || keys['ArrowUp'])    velocity.sub(forward);   // W/Up = up (away from cam)
     if (keys['KeyS'] || keys['ArrowDown'])  velocity.add(forward);   // S/Down = down (toward cam)
     if (keys['KeyA'] || keys['ArrowLeft'])  velocity.add(right);     // A/Left = left (camera-left)
-    if (keys['KeyD'] || keys['ArrowRight']) velocity.sub(right);     // D/Right = right (camera-right) 
+    if (keys['KeyD'] || keys['ArrowRight']) velocity.sub(right);     // D/Right = right (camera-right)
 
     if (velocity.lengthSq() > 0) {
         velocity.normalize().multiplyScalar(moveSpeed);
@@ -3711,7 +4173,31 @@ renderer.domElement.addEventListener('wheel', (event) => {
         const blockAtStepUp = getTerrainBlock(newX, newZ, currentFeetY + 1) !== undefined;
         const blockAboveStepUp = getTerrainBlock(newX, newZ, currentFeetY + 2) !== undefined;
         
-        if (blockAtCurrentLevel && blockAtHeadLevel) {
+        // Check for water at the destination - check multiple levels to be more thorough
+        // Also check adjacent positions to expand collision boundary by one block
+        let isWaterDestination = false;
+        for (let dy = -1; dy <= 2; dy++) {
+            const checkY = currentFeetY + dy;
+            // Check the target position and adjacent positions
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dz = -1; dz <= 1; dz++) {
+                    const checkX = newX + dx;
+                    const checkZ = newZ + dz;
+                    if (getTerrainBlock(checkX, checkZ, checkY) === MATERIALS.WATER.id) {
+                        isWaterDestination = true;
+                        break;
+                    }
+                }
+                if (isWaterDestination) break;
+            }
+            if (isWaterDestination) break;
+        }
+        
+        // Prevent walking on water
+        if (isWaterDestination) {
+            canMove = false;
+        }
+        else if (blockAtCurrentLevel && blockAtHeadLevel) {
             // 2+ block wall - cannot pass
             canMove = false;
         } else if (blockAtCurrentLevel) {
