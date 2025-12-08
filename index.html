@@ -3215,8 +3215,9 @@
             // Check for bear
             const bearIndex = bears.findIndex(bear => {
                 if (bear.isDying) return false;
-                const dist = getWrappedDistance(bear.position.x, bear.position.z, targetX + 0.5, targetZ + 0.5);
-                return dist < 1.5;
+                const bearX = Math.floor(bear.position.x);
+                const bearZ = Math.floor(bear.position.z);
+                return bearX === targetX && bearZ === targetZ;
             });
 
             if (bearIndex !== -1) {
@@ -3236,8 +3237,9 @@
             // Check for wolf
             const wolfIndex = wolves.findIndex(wolf => {
                 if (wolf.isDying) return false;
-                const dist = getWrappedDistance(wolf.position.x, wolf.position.z, targetX + 0.5, targetZ + 0.5);
-                return dist < 1.5;
+                const wolfX = Math.floor(wolf.position.x);
+                const wolfZ = Math.floor(wolf.position.z);
+                return wolfX === targetX && wolfZ === targetZ;
             });
 
             if (wolfIndex !== -1) {
@@ -3255,6 +3257,64 @@
             }
 
             return false; // No attack
+        }
+
+        function attackAnimalInDirection() {
+            const attackDistance = 1.5;
+            const direction = playerLastMoveDirection.clone().normalize();
+            const attackPos = playerPos.clone().add(direction.multiplyScalar(attackDistance));
+
+            // Check for bears
+            for (const bear of bears) {
+                if (bear.isDying) continue;
+                const distance = getWrappedDistance(attackPos.x, attackPos.z, bear.position.x, bear.position.z);
+                if (distance < 1.5) {
+                    bear.health -= (PLAYER_ATTACK_DAMAGE + skills.fighting);
+                    showNotification(`Attacked bear! Health: ${bear.health.toFixed(0)}/${BEAR_MAX_HEALTH}`, 1000);
+                    
+                    // Update health bar
+                    const healthPercentage = bear.health / BEAR_MAX_HEALTH;
+                    const healthBarScale = Math.max(0, healthPercentage);
+                    bear.healthBar.scale.x = healthBarScale;
+                    bear.healthBar.material.color.set(healthPercentage > 0.5 ? 0x00ff00 : (healthPercentage > 0.25 ? 0xffff00 : 0xff0000));
+                    
+                    if (bear.health <= 0 && !bear.isDying) {
+                        bear.isDying = true;
+                        levelUpSkill('fighting');
+                        inventory['Leather'] = (inventory['Leather'] || 0) + 5;
+                        inventory['Meat'] = (inventory['Meat'] || 0) + 3;
+                        updateInventoryUI();
+                        showNotification("Bear defeated! +5 Leather, +3 Meat", 2000);
+                    }
+                    return; // Only attack one animal at a time
+                }
+            }
+
+            // Check for wolves
+            for (const wolf of wolves) {
+                if (wolf.isDying) continue;
+                const distance = getWrappedDistance(attackPos.x, attackPos.z, wolf.position.x, wolf.position.z);
+                if (distance < 1.5) {
+                    wolf.health -= (PLAYER_ATTACK_DAMAGE + skills.fighting);
+                    showNotification(`Attacked wolf! Health: ${wolf.health.toFixed(0)}/${WOLF_MAX_HEALTH}`, 1000);
+
+                    // Update health bar
+                    const healthPercentage = wolf.health / WOLF_MAX_HEALTH;
+                    const healthBarScale = Math.max(0, healthPercentage);
+                    wolf.healthBar.scale.x = healthBarScale;
+                    wolf.healthBar.material.color.set(healthPercentage > 0.5 ? 0x00ff00 : (healthPercentage > 0.25 ? 0xffff00 : 0xff0000));
+
+                    if (wolf.health <= 0 && !wolf.isDying) {
+                        wolf.isDying = true;
+                        levelUpSkill('fighting', 0.5); // Less skill for wolves
+                        inventory['Fur'] = (inventory['Fur'] || 0) + 2;
+                        inventory['Meat'] = (inventory['Meat'] || 0) + 1;
+                        updateInventoryUI();
+                        showNotification("Wolf defeated! +2 Fur, +1 Meat", 2000);
+                    }
+                    return; // Only attack one animal at a time
+                }
+            }
         }
 
         function destroyBlockInDirection() {
@@ -3987,20 +4047,22 @@ function rotateCamera(dir) {
 }
 
         function startToolAnimation() {
-            if (equippedTool && equippedTool.id === TOOLS.PICKAXE.id) {
-                currentAnimation = playerFacing === 'front' ? 
-                    playerAnimationsWithPickaxe.miningFront : 
-                    playerAnimationsWithPickaxe.miningBack;
-            } else if (equippedTool && equippedTool.id === TOOLS.AXE.id) {
-                currentAnimation = playerFacing === 'front' ? 
-                    playerAnimationsWithAxe.cuttingFront : 
-                    playerAnimationsWithAxe.cuttingBack;
-            }
-            
-            if (currentAnimation) {
-                currentAnimation.play();
-                isUsingTool = true;
-                toolAnimationComplete = false;
+            if (!isUsingTool || (currentAnimation && currentAnimation.completed)) {
+                if (equippedTool && equippedTool.id === TOOLS.PICKAXE.id) {
+                    currentAnimation = playerFacing === 'front' ? 
+                        playerAnimationsWithPickaxe.miningFront : 
+                        playerAnimationsWithPickaxe.miningBack;
+                } else if (equippedTool && equippedTool.id === TOOLS.AXE.id) {
+                    currentAnimation = playerFacing === 'front' ? 
+                        playerAnimationsWithAxe.cuttingFront : 
+                        playerAnimationsWithAxe.cuttingBack;
+                }
+                
+                if (currentAnimation) {
+                    currentAnimation.play();
+                    isUsingTool = true;
+                    toolAnimationComplete = false;
+                }
             }
         }
 
@@ -4128,14 +4190,17 @@ rotateCamera( 1)
                 if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') {
                     event.preventDefault();
                     
-                    if (equippedTool && equippedTool.id === TOOLS.PICKAXE.id) {
+                    if (equippedTool) {
                         startToolAnimation();
-                        destroyBlockInDirection();
-                    } else if (equippedTool && equippedTool.id === TOOLS.AXE.id) {
-                        startToolAnimation();
-                        cutTreeInDirection();
-                    } else if (equippedTool && equippedTool.id === TOOLS.FISHING_ROD.id) {
-                        startFishing();
+                        if (equippedTool.id === TOOLS.PICKAXE.id) {
+                            destroyBlockInDirection();
+                            attackAnimalInDirection();
+                        } else if (equippedTool.id === TOOLS.AXE.id) {
+                            cutTreeInDirection();
+                            attackAnimalInDirection();
+                        } else if (equippedTool.id === TOOLS.FISHING_ROD.id) {
+                            startFishing();
+                        }
                     } else if (!equippedTool && selectedMaterial) {
                         placeBlockInDirection();
                     } else if (plantingSeeds) {
@@ -4144,6 +4209,7 @@ rotateCamera( 1)
                         // Try to pick fruit or harvest herbs
                         pickFruitInDirection();
                         harvestHerbInDirection();
+                        attackAnimalInDirection();
                     }
                 } else if (event.code === 'Space') {
                     event.preventDefault();
