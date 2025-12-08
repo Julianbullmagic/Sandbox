@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Report - Water Collision & Fishing Animation Fixes</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(to bottom, #87CEEB, #1E90FF);
+            color: #333;
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .test-section {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+        }
+        h2 {
+            color: #34495e;
+            margin-top: 0;
+        }
+        .test-case {
+            margin: 15px 0;
+            padding: 10px;
+            background: #f8f9fa;
+            border-left: 4px solid #3498db;
+            border-radius: 5px;
+        }
+        .test-case h3 {
+            margin: 0 0 10px 0;
+            color: #2c3e50;
+        }
+        .status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        .status.pending {
+            background: #f39c12;
+            color: white;
+        }
+        .status.pass {
+            background: #27ae60;
+            color: white;
+        }
+        .status.fail {
+            background: #e74c3c;
+            color: white;
+        }
+        .code-snippet {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            margin: 10px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+        .issue-description {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .fix-description {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .note {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎮 Isometric Sandbox Game - Test Report</h1>
+    
+    <div class="test-section">
+        <h2>📋 Test Overview</h2>
+        <p><strong>Date:</strong> November 10, 2025</p>
+        <p><strong>Issues Tested:</strong></p>
+        <ul>
+            <li>Water collision detection (approaching from sides)</li>
+            <li>Water collision when walking forward into water (W key)</li>
+            <li>Fishing rod animation flipping (diagonal movement)</li>
+            <li>Tree positioning (floating above terrain)</li>
+        </ul>
+    </div>
+
+    <div class="test-section">
+        <h2>🌊 Issue #1: Water Collision Detection</h2>
+        
+        <div class="issue-description">
+            <h3>Original Issue</h3>
+            <p>When approaching water from the sides, the player cannot get very close and stops about 2 blocks away from it. Additionally, when moving forward into water (away from camera), the player can walk on top of the water surface.</p>
+        </div>
+
+        <div class="fix-description">
+            <h3>Implemented Fix</h3>
+            <p>Modified the water collision detection in <code>handleMovement()</code> function with comprehensive water detection:</p>
+            <div class="code-snippet">
+// Check for water at the destination - be more precise about water collision
+// Check the target position at feet level and just below
+let isWaterDestination = false;
+
+// Check at feet level (where the player will be standing)
+const blockAtFeet = getTerrainBlock(newX, newZ, currentFeetY);
+const blockBelowFeet = getTerrainBlock(newX, newZ, currentFeetY - 1);
+
+// If there's water at feet level, or water below where the player wants to step
+if (blockAtFeet === MATERIALS.WATER.id || blockBelowFeet === MATERIALS.WATER.id) {
+    isWaterDestination = true;
+}
+
+// Also check if the player is trying to step onto water from above
+// If the target position is empty but there's water directly below it
+if (!isWaterDestination && blockAtFeet === undefined && blockBelowFeet === MATERIALS.WATER.id) {
+    // This is water surface - prevent walking on it
+    isWaterDestination = true;
+}
+
+// SPECIAL FIX: Prevent walking forward onto water (W key issue)
+// Check if player is at water's edge and trying to move forward
+const currentBlockBelow = getTerrainBlock(Math.floor(player.position.x), Math.floor(player.position.z), currentFeetY - 1);
+const isAtWatersEdge = currentBlockBelow === MATERIALS.WATER.id;
+
+// If at water's edge and moving forward (away from camera), prevent movement
+if (isAtWatersEdge && moveDirection.z > 0.5) {
+    isWaterDestination = true;
+}
+
+// Predictive check: look ahead 1-2 positions when moving forward
+if (moveDirection.z > 0.5) {
+    for (let i = 1; i <= 2; i++) {
+        const aheadX = Math.floor(player.position.x + moveDirection.x * i);
+        const aheadZ = Math.floor(player.position.z + moveDirection.z * i);
+        const aheadBlock = getTerrainBlock(aheadX, aheadZ, currentFeetY);
+        const aheadBlockBelow = getTerrainBlock(aheadX, aheadZ, currentFeetY - 1);
+        
+        if (aheadBlock === MATERIALS.WATER.id || aheadBlockBelow === MATERIALS.WATER.id) {
+            isWaterDestination = true;
+            break;
+        }
+    }
+}
+
+// Prevent walking on water
+if (isWaterDestination) {
+    canMove = false;
+}
+            </div>
+        </div>
+
+        <div class="test-case">
+            <h3>Test Case 1.1: Approach water from the side <span class="status pending">PENDING</span></h3>
+            <p><strong>Steps:</strong></p>
+            <ol>
+                <li>Find a water body</li>
+                <li>Approach it from the side (left or right) using A/D keys</li>
+                <li>Try to get as close as possible</li>
+            </ol>
+            <p><strong>Expected Result:</strong> Player should be able to approach within 1 block of water edge</p>
+            <p><strong>Actual Result:</strong> <em>Pending testing</em></p>
+        </div>
+
+        <div class="test-case">
+            <h3>Test Case 1.2: Walk forward into water (away from camera) <span class="status pending">PENDING</span></h3>
+            <p><strong>Steps:</strong></p>
+            <ol>
+                <li>Stand near water edge</li>
+                <li>Press W to move forward into water (away from camera)</li>
+            </ol>
+            <p><strong>Expected Result:</strong> Player should stop at water edge and not walk on water surface</p>
+            <p><strong>Actual Result:</strong> <em>Pending testing</em></p>
+        </div>
+
+        <div class="test-case">
+            <h3>Test Case 1.3: Approach water from multiple angles <span class="status pending">PENDING</span></h3>
+            <p><strong>Steps:</strong></p>
+            <ol>
+                <li>Test approaching water from north, south, east, and west</li>
+                <li>Test diagonal approaches</li>
+            </ol>
+            <p><strong>Expected Result:</strong> Consistent collision detection from all angles</p>
+            <p><strong>Actual Result:</strong> <em>Pending testing</em></p>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>🎣 Issue #2: Fishing Rod Animation Flipping</h2>
+        
+        <div class="issue-description">
+            <h3>Original Issue</h3>
+            <p>When walking in an up-left diagonal direction (W+A) or up-right diagonal direction (W+D) with the fishing rod equipped, the fishing rod walking animation is flipped incorrectly. The animation should show the mirrored version when moving diagonally upward.</p>
+        </div>
+
+        <div class="fix-description">
+            <h3>Implemented Fix</h3>
+            <p>Modified the animation flipping logic in <code>updatePlayerAnimation()</code> function:</p>
+            <div class="code-snippet">
+// Determine horizontal flip based on left/right relative to camera
+const cameraRight = new THREE.Vector3();
+cameraRight.crossVectors(cameraForward, new THREE.Vector3(0, 1, 0)).normalize();
+const dotRight = moveDirection.dot(cameraRight);
+
+// Simplified flipping logic: flip when moving right relative to camera
+// This works for both front and back facing, and handles diagonals correctly
+playerFlipX = dotRight > 0.1; // Add threshold to avoid jitter
+
+// Special case: when moving away from camera (back facing) and moving left, don't flip
+// This fixes the diagonal movement issue
+if (playerFacing === 'back' && dotRight < -0.1) {
+    playerFlipX = false;
+}
+            </div>
+        </div>
+
+        <div class="test-case">
+            <h3>Test Case 2.1: Up-left diagonal movement (W+A) <span class="status pending">PENDING</span></h3>
+            <p><strong>Steps:</strong></p>
+            <ol>
+                <li>Equip fishing rod</li>
+                <li>Hold W+A to move up-left diagonally</li>
+                <li>Observe animation flipping</li>
+            </ol>
+            <p><strong>Expected Result:</strong> Animation should be correctly mirrored for this direction</p>
+            <p><strong>Actual Result:</strong> <em>Pending testing</em></p>
+        </div>
+
+        <div class="test-case">
+            <h3>Test Case 2.2: Up-right diagonal movement (W+D) <span class="status pending">PENDING</span></h3>
+            <p><strong>Steps:</strong></p>
+            <ol>
+                <li>Equip fishing rod</li>
+                <li>Hold W+D to move up-right diagonally</li>
+                <li>Observe animation flipping</li>
+            </ol>
+            <p><strong>Expected Result:</strong> Animation should be correctly mirrored for this direction</p>
+            <p><strong>Actual Result:</strong> <em>Pending testing</em></p>
+        </div>
+
+        <div class="test-case">
+            <h3>Test Case 2.3: Down-left diagonal movement (S+A) <span class="status pending">PENDING</span></h3>
+            <p><strong>Steps:</strong></p>
+            <ol>
+                <li>Equip fishing rod</li>
+                <li>Hold S+A to move down-left diagonally</li>
+                <li>Observe animation flipping</li>
+            </ol>
+            <p><strong>Expected Result:</strong> Animation should be correctly mirrored for this direction</p>
+            <p><strong>Actual Result:</strong> <em>Pending testing</em></p>
+        </div>
+
+        <div class="test-case">
+            <h3>Test Case 2.4: Down-right diagonal movement (S+D) <span class="status pending">PENDING</span></h3>
+            <p><strong>Steps:</strong></p>
+            <ol>
+                <li>Equip fishing rod</li>
+                <li>Hold S+D to move down-right diagonally</li>
+                <li>Observe animation flipping</li>
+            </ol>
+            <p><strong>Expected Result:</strong> Animation should be correctly mirrored for this direction</p>
+            <p><strong>Actual Result:</strong> <em>Pending testing</em></p>
+        </div>
+
+        <div class="test-case">
+            <h3>Test Case 2.5: Pure horizontal movement with fishing rod <span class="status pending">PENDING</span></h3>
+            <p><strong>Steps:</strong></p>
+            <ol>
+                <li>Equip fishing rod</li>
+                <li>Press A or D for pure left/right movement</li>
+                <li>Observe animation flipping</li>
+            </ol>
+            <p><strong>Expected Result:</strong> Animation should flip correctly for left/right movement</p>
+            <p><strong>Actual Result:</strong> <em>Pending testing</em></p>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>📝 Additional Notes</h2>
+        <div class="note">
+            <p><strong>Testing Instructions:</strong></p>
+            <ol>
+                <li>Open <code>index.html</code> in a web browser</li>
+                <li>Test each scenario described above</li>
+                <li>Update this report with actual results</li>
+                <li>If issues persist, note specific behaviors observed</li>
+            </ol>
+        </div>
+        
+        <div class="note">
+            <p><strong>Known Considerations:</strong></p>
+            <ul>
+                <li>Water collision detection uses precise block checking at feet level</li>
+                <li>Animation flipping is based on camera-relative movement direction</li>
+                <li>Threshold values (0.1) are used to prevent animation jitter</li>
+                <li>Special cases handle back-facing movement differently</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <p><em>Last updated: November 10, 2025</em></p>
+    </div>
+
+    <div class="test-section">
+        <h2>🌳 Issue #3: Tree Positioning</h2>
+        
+        <div class="issue-description">
+            <h3>Original Issue</h3>
+            <p>Some trees appear to be floating above the terrain blocks below them. The trees are positioned too high relative to the ground surface.</p>
+        </div>
+
+        <div class="fix-description">
+            <h3>Implemented Fix</h3>
+            <p>Adjusted tree Y-position in both <code>generateTrees()</code> and <code>plantTree()</code> functions:</p>
+            <div class="code-snippet">
+// In generateTrees() function (line ~2047):
+// Changed from: tree.position.set(x + 0.5, topY + 1, z + 0.5);
+// Changed to: tree.position.set(x + 0.5, topY, z + 0.5);
+
+// In plantTree() function (line ~3533):
+// Changed from: tree.position.set(x + 0.5, topY + 1, z + 0.5);
+// Changed to: tree.position.set(x + 0.5, topY, z + 0.5);
+            </div>
+        </div>
+
+        <div class="test-case">
+            <h3>Test Case 3.1: Tree alignment with terrain <span class="status pending">PENDING</span></h3>
+            <p><strong>Steps:</strong></p>
+            <ol>
+                <li>Generate a new world or plant trees</li>
+                <li>Observe tree positions relative to terrain</li>
+                <li>Check that tree bases sit flush on ground</li>
+            </ol>
+            <p><strong>Expected Result:</strong> Trees should sit directly on terrain without floating</p>
+            <p><strong>Actual Result:</strong> <em>Pending testing</em></p>
+        </div>
+
+        <div class="test-case">
+            <h3>Test Case 3.2: Tree planting on different terrain heights <span class="status pending">PENDING</span></h3>
+            <p><strong>Steps:</strong></p>
+            <ol>
+                <li>Plant trees on flat ground</li>
+                <li>Plant trees on slopes</li>
+                <li>Plant trees near water edges</li>
+            </ol>
+            <p><strong>Expected Result:</strong> Trees should align properly with terrain at all heights</p>
+            <p><strong>Actual Result:</strong> <em>Pending testing</em></p>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>✅ Test Results Summary</h2>
+        <p><strong>Overall Status:</strong> <span class="status pending">PENDING TESTING</span></p>
+        <p><strong>Tests Passed:</strong> 0/11</p>
+        <p><strong>Tests Failed:</strong> 0/11</p>
+        <p><strong>Tests Pending:</strong> 11/11</p>
+        
+        <p><em>Last updated: November 10, 2025</em></p>
+    </div>
+</body>
+</html>

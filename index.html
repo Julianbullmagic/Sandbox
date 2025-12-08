@@ -299,9 +299,120 @@
         #gameOver button:hover {
             background: #cc0000;
         }
+
+        .side-menu {
+            position: absolute;
+            top: 0;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 15px;
+            z-index: 10;
+            transition: transform 0.3s ease-in-out;
+            max-height: 100vh;
+            overflow-y: auto;
+            width: 250px;
+        }
+
+        #leftMenu {
+            left: 0;
+            transform: translateX(-250px);
+        }
+        #leftMenu.open {
+            transform: translateX(0);
+        }
+
+        #rightMenu {
+            right: 0;
+            transform: translateX(250px);
+        }
+        #rightMenu.open {
+            transform: translateX(0);
+        }
+
+        .menu-toggle {
+            position: fixed;
+            top: 50%;
+            transform: translateY(-50%);
+            background: #ff9800;
+            border: none;
+            color: white;
+            cursor: pointer;
+            padding: 10px 5px;
+            z-index: 11;
+        }
+        
+        #leftMenuToggle {
+            left: 0;
+            border-radius: 0 5px 5px 0;
+        }
+        #rightMenuToggle {
+            right: 0;
+            border-radius: 5px 0 0 5px;
+        }
     </style>
 </head>
 <body>
+    <button id="leftMenuToggle" class="menu-toggle">&gt;</button>
+    <div id="leftMenu" class="side-menu">
+        <div id="skillsContainer">
+            <h3>Skills</h3>
+            <div id="skillsList"></div>
+        </div>
+        <div id="controls">
+            <div>Game Controls</div>
+            <div class="controls-grid">
+                <div class="control-item">
+                    Movement: <span class="key">W</span> <span class="key">A</span> <span class="key">S</span> <span class="key">D</span>
+                </div>
+                <div class="control-item">
+                    Destroy Block: <span class="key">SPACE</span>
+                </div>
+                <div class="control-item">
+                    Place Block: <span class="key">ALT</span>
+                </div>
+                <div class="control-item">
+                    Use Tool/Harvest: <span class="key">SHIFT</span>
+                </div>
+                <div class="control-item">
+                    Zoom: <span class="key">MOUSE WHEEL</span>
+                </div>
+                <div class="control-item">
+                    Select Item: <span class="key">CLICK</span>
+                </div>
+                <div class="control-item">
+                    Eat Fruit: <span class="key">F</span>
+                </div>
+                <div class="control-item">
+                    Use Herb: <span class="key">H</span>
+                </div>
+                <div class="control-item">
+                    Sleep (Night): <span class="key">Z</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <button id="rightMenuToggle" class="menu-toggle">&lt;</button>
+    <div id="rightMenu" class="side-menu">
+        <div id="inventory">
+            <h3>Inventory</h3>
+            <div class="inventory-section">
+                <h4>Materials</h4>
+                <div id="materialInventory"></div>
+            </div>
+            <div class="inventory-section">
+                <h4>Resources</h4>
+                <div id="resourceInventory"></div>
+            </div>
+            <div class="inventory-section">
+                <h4>Tools</h4>
+                <div id="toolInventory"></div>
+            </div>
+            <button id="plantButton" class="action-button">Plant Tree (Seeds)</button>
+        </div>
+    </div>
+
     <div id="gameContainer"></div>
     <div id="statsBar">
         <div class="stat-container">
@@ -317,54 +428,7 @@
             </div>
         </div>
     </div>
-    <div id="inventory">
-        <h3>Inventory</h3>
-        <div class="inventory-section">
-            <h4>Materials</h4>
-            <div id="materialInventory"></div>
-        </div>
-        <div class="inventory-section">
-            <h4>Resources</h4>
-            <div id="resourceInventory"></div>
-        </div>
-        <div class="inventory-section">
-            <h4>Tools</h4>
-            <div id="toolInventory"></div>
-        </div>
-        <button id="plantButton" class="action-button">Plant Tree (Seeds)</button>
-    </div>
-    <div id="controls">
-        <div>Game Controls</div>
-        <div class="controls-grid">
-            <div class="control-item">
-                Movement: <span class="key">W</span> <span class="key">A</span> <span class="key">S</span> <span class="key">D</span>
-            </div>
-            <div class="control-item">
-                Destroy Block: <span class="key">SPACE</span>
-            </div>
-            <div class="control-item">
-                Place Block: <span class="key">ALT</span>
-            </div>
-            <div class="control-item">
-                Use Tool/Harvest: <span class="key">SHIFT</span>
-            </div>
-            <div class="control-item">
-                Zoom: <span class="key">MOUSE WHEEL</span>
-            </div>
-            <div class="control-item">
-                Select Item: <span class="key">CLICK</span>
-            </div>
-            <div class="control-item">
-                Eat Fruit: <span class="key">F</span>
-            </div>
-            <div class="control-item">
-                Use Herb: <span class="key">H</span>
-            </div>
-            <div class="control-item">
-                Sleep (Night): <span class="key">Z</span>
-            </div>
-        </div>
-    </div>
+    
     <div id="notification"></div>
     <button id="sleepButton">Sleep (Skip 10 min)</button>
     <div id="damageOverlay"></div>
@@ -437,6 +501,24 @@
         let fishingStartTime = 0;
         let fishingWaitTime = 0;
         let fishingState = 'idle'; // 'idle', 'casting', 'waiting', 'bite', 'catching'
+
+        // Player Skills
+        let skills = {
+            mining: 0,
+            fishing: 0,
+            lumberjacking: 0,
+            fighting: 0
+        };
+        const MAX_SKILL_LEVEL = 30;
+
+        // Long Action variables
+        let isPerformingLongAction = false;
+        let longActionType = null;
+        let longActionStartTime = 0;
+        let longActionDuration = 0;
+        let longActionOnComplete = null;
+
+
         let globalTreeTexture; // Store tree texture globally
         let globalTreeWithFruitTexture; // Store tree with fruit texture globally
         let lastGrowthUpdate = 0; // For tree growth timing
@@ -515,7 +597,7 @@
         const WOLF_MAX_HEALTH = 50;
 //updateFal
         // Camera offset from player - zoomed in 33% closer
-        const cameraOffset = new THREE.Vector3(-1.25, 1.67, -1.25);
+        const cameraOffset = new THREE.Vector3(-1.875, 2.505, -1.875);
 
         // Block materials with frequency property
         const MATERIALS = {
@@ -859,6 +941,7 @@
             updateCameraPosition();
             setupControls();
             updateInventoryUI();
+            updateSkillsUI();
 
             // Initialize last growth update time
             lastGrowthUpdate = Date.now();
@@ -1163,6 +1246,62 @@
             }
         }
 
+        function getSkillBasedDuration(skillName) {
+            const baseTime = 30000; // 30 seconds
+            const timeReductionPerLevel = 1000; // 1 second
+            const level = skills[skillName] || 0;
+            const duration = baseTime - (level * timeReductionPerLevel);
+            return Math.max(duration, 1000); // Minimum 1 second
+        }
+
+        function levelUpSkill(skillName, amount = 1) {
+            if (skills[skillName] < MAX_SKILL_LEVEL) {
+                skills[skillName] += amount;
+                if (skills[skillName] > MAX_SKILL_LEVEL) {
+                    skills[skillName] = MAX_SKILL_LEVEL;
+                }
+                showNotification(`${skillName} skill increased to level ${skills[skillName]}!`);
+            } else {
+                showNotification(`${skillName} skill is at max level!`);
+            }
+            updateSkillsUI();
+        }
+
+        function startLongAction(skillName, onComplete) {
+            if (isPerformingLongAction) return;
+
+            isPerformingLongAction = true;
+            longActionType = skillName;
+            longActionStartTime = Date.now();
+            longActionDuration = getSkillBasedDuration(skillName);
+            longActionOnComplete = onComplete;
+            
+            // TODO: Add a progress bar UI
+            showNotification(`Starting to ${skillName}...`);
+        }
+
+        function updateLongAction() {
+            if (!isPerformingLongAction) return;
+
+            const elapsedTime = Date.now() - longActionStartTime;
+            const progress = elapsedTime / longActionDuration;
+
+            // TODO: Update progress bar UI
+
+            if (progress >= 1) {
+                isPerformingLongAction = false;
+                
+                if (longActionOnComplete) {
+                    longActionOnComplete();
+                }
+                
+                if (longActionType !== 'fighting') {
+                    levelUpSkill(longActionType);
+                }
+            }
+        }
+
+
         function validateTrees() {
             // Check all trees and remove any that are floating (no soil beneath)
             for (let i = trees.length - 1; i >= 0; i--) {
@@ -1203,6 +1342,14 @@
             console.log(`Validated trees: ${trees.length} trees remaining`);
         }
         
+        function createHealthBar() {
+            const healthBarGeo = new THREE.PlaneGeometry(1, 0.1);
+            const healthBarMat = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+            const healthBar = new THREE.Mesh(healthBarGeo, healthBarMat);
+            healthBar.position.y = 1; // Position it above the animal
+            return healthBar;
+        }
+
         function generateBears() {
             const numBears = 5; // Spawn 5 bears
             const placedPositions = new Set();
@@ -1254,8 +1401,7 @@
                 
                 const bearPos = new THREE.Vector3(x + 0.5, topY + 1.6, z + 0.5);
                 
-                // Create 9 copies of bear for seamless wrapping
-                const bearGroup = new THREE.Group();
+                const bearVisuals = new THREE.Group();
                 for (let offsetX = -1; offsetX <= 1; offsetX++) {
                     for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
                         const bearMesh = new THREE.Mesh(bearGeo, bearMat.clone());
@@ -1264,14 +1410,23 @@
                             topY + 1.6,
                             z + 0.5 + offsetZ * worldSize
                         );
-                        bearGroup.add(bearMesh);
+                        bearVisuals.add(bearMesh);
                     }
                 }
+
+                const healthBar = createHealthBar();
+                healthBar.visible = false;
+
+                const bearGroup = new THREE.Group();
+                bearGroup.add(bearVisuals);
+                bearGroup.add(healthBar);
                 scene.add(bearGroup);
                 
                 bears.push({
                     group: bearGroup,
-                    mesh: bearGroup.children[4], // Center copy
+                    visuals: bearVisuals,
+                    mesh: bearVisuals.children[4], // Center copy
+                    healthBar: healthBar,
                     position: bearPos,
                     x: x + 0.5,
                     z: z + 0.5,
@@ -1300,7 +1455,7 @@
                     bear.deathProgress += deltaTime * 2;
                     
                     // Flip upside down and fade
-                    for (const bearCopy of bear.group.children) {
+                    for (const bearCopy of bear.visuals.children) {
                         bearCopy.rotation.z = Math.PI * bear.deathProgress; // Flip
                         bearCopy.material.opacity = Math.max(0, 1 - bear.deathProgress);
                     }
@@ -1321,6 +1476,9 @@
                     bear.position.x, bear.position.z,
                     playerPos.x, playerPos.z
                 );
+
+                // Health bar visibility
+                bear.healthBar.visible = distanceToPlayer < BEAR_CHASE_DISTANCE;
                 
                 // Update bear state
                 if (distanceToPlayer < BEAR_CHASE_DISTANCE) {
@@ -1339,8 +1497,10 @@
                         playerPos.x, playerPos.z
                     );
                     
-                    bear.position.x += dirToPlayer.x * BEAR_SPEED;
-                    bear.position.z += dirToPlayer.z * BEAR_SPEED;
+                    if (distanceToPlayer > BEAR_ATTACK_DISTANCE) {
+                        bear.position.x += dirToPlayer.x * BEAR_SPEED;
+                        bear.position.z += dirToPlayer.z * BEAR_SPEED;
+                    }
                     moveDirection.copy(dirToPlayer);
                     
                     // Attack if close enough
@@ -1390,23 +1550,28 @@
                 
                 // Update all 9 copies of the bear
                 let copyIndex = 0;
-                for (let offsetX = -1; offsetX <= 1; offsetX++) {
-                    for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
-                        const bearCopy = bear.group.children[copyIndex];
-                        bearCopy.position.set(
-                            bear.position.x + offsetX * worldSize,
-                            bear.position.y,
-                            bear.position.z + offsetZ * worldSize
-                        );
-                        // Make parallel to viewing plane
-                        const angle = Math.atan2(
-                            camera.position.x - bearCopy.position.x,
-                            camera.position.z - bearCopy.position.z
-                        );
-                        bearCopy.rotation.y = angle;
-                        copyIndex++;
-                    }
+                for (const bearCopy of bear.visuals.children) {
+                    bearCopy.position.set(
+                        bear.position.x + (copyIndex % 3 - 1) * worldSize,
+                        bear.position.y,
+                        bear.position.z + (Math.floor(copyIndex / 3) - 1) * worldSize
+                    );
+                    // Make parallel to viewing plane
+                    const angle = Math.atan2(
+                        camera.position.x - bearCopy.position.x,
+                        camera.position.z - bearCopy.position.z
+                    );
+                    bearCopy.rotation.y = angle;
+                    copyIndex++;
                 }
+
+                // Update health bar position and rotation
+                bear.healthBar.position.set(bear.position.x, bear.position.y + 1.0, bear.position.z);
+                const angle = Math.atan2(
+                    camera.position.x - bear.healthBar.position.x,
+                    camera.position.z - bear.healthBar.position.z
+                );
+                bear.healthBar.rotation.y = angle;
                 
                 // Determine which direction row to use based on movement relative to camera
                 let directionRow = 0; // Default to front
@@ -1454,7 +1619,7 @@
                 // Update texture offset for animation and direction on all 9 copies
                 const frameW = 1 / 4;
                 const frameH = 1 / 4;
-                for (const bearCopy of bear.group.children) {
+                for (const bearCopy of bear.visuals.children) {
                     bearCopy.material.map.repeat.set(frameW, frameH);
                     bearCopy.material.map.offset.x = bear.currentFrame * frameW;
                     bearCopy.material.map.offset.y = 1 - (directionRow + 1) * frameH;
@@ -1513,8 +1678,7 @@
                 
                 const wolfPos = new THREE.Vector3(x + 0.5, topY + 1.45, z + 0.5);
                 
-                // Create 9 copies of wolf for seamless wrapping
-                const wolfGroup = new THREE.Group();
+                const wolfVisuals = new THREE.Group();
                 for (let offsetX = -1; offsetX <= 1; offsetX++) {
                     for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
                         const wolfMesh = new THREE.Mesh(wolfGeo, wolfMat.clone());
@@ -1523,14 +1687,23 @@
                             topY + 1.45,
                             z + 0.5 + offsetZ * worldSize
                         );
-                        wolfGroup.add(wolfMesh);
+                        wolfVisuals.add(wolfMesh);
                     }
                 }
+                
+                const healthBar = createHealthBar();
+                healthBar.visible = false;
+
+                const wolfGroup = new THREE.Group();
+                wolfGroup.add(wolfVisuals);
+                wolfGroup.add(healthBar);
                 scene.add(wolfGroup);
                 
                 wolves.push({
                     group: wolfGroup,
-                    mesh: wolfGroup.children[4], // Center copy
+                    visuals: wolfVisuals,
+                    mesh: wolfVisuals.children[4], // Center copy
+                    healthBar: healthBar,
                     position: wolfPos,
                     x: x + 0.5,
                     z: z + 0.5,
@@ -1559,7 +1732,7 @@
                     wolf.deathProgress += deltaTime * 2;
                     
                     // Flip upside down and fade
-                    for (const wolfCopy of wolf.group.children) {
+                    for (const wolfCopy of wolf.visuals.children) {
                         wolfCopy.rotation.z = Math.PI * wolf.deathProgress; // Flip
                         wolfCopy.material.opacity = Math.max(0, 1 - wolf.deathProgress);
                     }
@@ -1577,6 +1750,9 @@
                     playerPos.x, playerPos.z
                 );
                 
+                // Health bar visibility
+                wolf.healthBar.visible = distanceToPlayer < WOLF_CHASE_DISTANCE;
+
                 // Update wolf state
                 if (distanceToPlayer < WOLF_CHASE_DISTANCE) {
                     wolf.state = 'chase';
@@ -1594,8 +1770,10 @@
                         playerPos.x, playerPos.z
                     );
                     
-                    wolf.position.x += dirToPlayer.x * WOLF_SPEED;
-                    wolf.position.z += dirToPlayer.z * WOLF_SPEED;
+                    if (distanceToPlayer > WOLF_ATTACK_DISTANCE) {
+                        wolf.position.x += dirToPlayer.x * WOLF_SPEED;
+                        wolf.position.z += dirToPlayer.z * WOLF_SPEED;
+                    }
                     moveDirection.copy(dirToPlayer);
                     
                     // Attack if close enough
@@ -1645,23 +1823,28 @@
                 
                 // Update all 9 copies of the wolf
                 let copyIndex = 0;
-                for (let offsetX = -1; offsetX <= 1; offsetX++) {
-                    for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
-                        const wolfCopy = wolf.group.children[copyIndex];
-                        wolfCopy.position.set(
-                            wolf.position.x + offsetX * worldSize,
-                            wolf.position.y,
-                            wolf.position.z + offsetZ * worldSize
-                        );
-                        // Make parallel to viewing plane
-                        const angle = Math.atan2(
-                            camera.position.x - wolfCopy.position.x,
-                            camera.position.z - wolfCopy.position.z
-                        );
-                        wolfCopy.rotation.y = angle;
-                        copyIndex++;
-                    }
+                for (const wolfCopy of wolf.visuals.children) {
+                    wolfCopy.position.set(
+                        wolf.position.x + (copyIndex % 3 - 1) * worldSize,
+                        wolf.position.y,
+                        wolf.position.z + (Math.floor(copyIndex / 3) - 1) * worldSize
+                    );
+                    // Make parallel to viewing plane
+                    const angle = Math.atan2(
+                        camera.position.x - wolfCopy.position.x,
+                        camera.position.z - wolfCopy.position.z
+                    );
+                    wolfCopy.rotation.y = angle;
+                    copyIndex++;
                 }
+
+                // Update health bar position and rotation
+                wolf.healthBar.position.set(wolf.position.x, wolf.position.y + 0.8, wolf.position.z);
+                const angle = Math.atan2(
+                    camera.position.x - wolf.healthBar.position.x,
+                    camera.position.z - wolf.healthBar.position.z
+                );
+                wolf.healthBar.rotation.y = angle;
                 
                 // Determine which direction row to use based on movement relative to camera
                 let directionRow = 0; // Default to front
@@ -1707,7 +1890,7 @@
                 // Update texture offset for animation and direction on all 9 copies
                 const frameW = 1 / 3; // 3 columns
                 const frameH = 1 / 4; // 4 rows
-                for (const wolfCopy of wolf.group.children) {
+                for (const wolfCopy of wolf.visuals.children) {
                     wolfCopy.material.map.repeat.set(frameW, frameH);
                     wolfCopy.material.map.offset.x = wolf.currentFrame * frameW;
                     wolfCopy.material.map.offset.y = 1 - (directionRow + 1) * frameH;
@@ -2243,25 +2426,35 @@
                 currentAnimation.update(deltaTime);
                 
                 if (currentAnimation.completed) {
-                    isUsingTool = false;
-                    toolAnimationComplete = true;
-                    
-                    // Return to idle animation after tool use
-                    let animationSet;
-                    if (equippedTool && equippedTool.id === TOOLS.PICKAXE.id) {
-                        animationSet = playerAnimationsWithPickaxe;
-                    } else if (equippedTool && equippedTool.id === TOOLS.AXE.id) {
-                        animationSet = playerAnimationsWithAxe;
-                    } else if (equippedTool && equippedTool.id === TOOLS.FISHING_ROD.id) {
-                        animationSet = playerAnimationsWithFishingRod;
+                    if (keys['ShiftLeft'] || keys['ShiftRight'] || keys['Space']) { // if attack key is still down
+                        currentAnimation.play(); // restart animation
+                        
+                        if (equippedTool && equippedTool.id === TOOLS.PICKAXE.id) {
+                            destroyBlockInDirection();
+                        } else if (equippedTool && equippedTool.id === TOOLS.AXE.id) {
+                            cutTreeInDirection();
+                        }
                     } else {
-                        animationSet = playerAnimations;
+                        isUsingTool = false;
+                        toolAnimationComplete = true;
+                        
+                        // Return to idle animation after tool use
+                        let animationSet;
+                        if (equippedTool && equippedTool.id === TOOLS.PICKAXE.id) {
+                            animationSet = playerAnimationsWithPickaxe;
+                        } else if (equippedTool && equippedTool.id === TOOLS.AXE.id) {
+                            animationSet = playerAnimationsWithAxe;
+                        } else if (equippedTool && equippedTool.id === TOOLS.FISHING_ROD.id) {
+                            animationSet = playerAnimationsWithFishingRod;
+                        } else {
+                            animationSet = playerAnimations;
+                        }
+                        
+                        currentAnimation = playerFacing === 'front' ?
+                            animationSet.idleFront :
+                            animationSet.idleBack;
+                        currentAnimation.play();
                     }
-                    
-                    currentAnimation = playerFacing === 'front' ?
-                        animationSet.idleFront :
-                        animationSet.idleBack;
-                    currentAnimation.play();
                 }
                 
                 updatePlayerSpriteTexture();
@@ -2320,11 +2513,15 @@
                 const cameraRight = new THREE.Vector3();
                 cameraRight.crossVectors(cameraForward, new THREE.Vector3(0, 1, 0)).normalize();
                 const dotRight = moveDirection.dot(cameraRight);
-                // For back-facing (moving away), flip on left; for front-facing (toward camera), flip on right
-                if (playerFacing === 'front') {
-                    playerFlipX = dotRight > 0; // moving right -> flip
-                } else {
-                    playerFlipX = dotRight < 0; // moving left  -> flip
+                
+                // Simplified flipping logic: flip when moving right relative to camera
+                // This works for both front and back facing, and handles diagonals correctly
+                playerFlipX = dotRight > 0.1; // Add threshold to avoid jitter
+                
+                // Special case: when moving away from camera (back facing) and moving left, don't flip
+                // This fixes the diagonal movement issue
+                if (playerFacing === 'back' && dotRight < -0.1) {
+                    playerFlipX = false;
                 }
             }
             
@@ -2364,7 +2561,7 @@
             // These animations should be twice as big:
             // - castingFront (throwing_fishing_rod_front)
             // - waitingFront (idle_fishing_front)
-            // - fishBiteFront (struggling_with_the_fish_front)
+            // - fishBiteFront (fish_bit_the_line_front)
             // - catchingFront (catching_the_fish_front)
             if (playerSprite && (currentAnimation === playerAnimationsWithFishingRod.castingFront ||
                                 currentAnimation === playerAnimationsWithFishingRod.waitingFront ||
@@ -2993,10 +3190,84 @@
             }
         }
 
+        function updateSkillsUI() {
+            const skillsList = document.getElementById('skillsList');
+            skillsList.innerHTML = '';
+            for (const skill in skills) {
+                const p = document.createElement('p');
+                p.textContent = `${skill.charAt(0).toUpperCase() + skill.slice(1)}: ${skills[skill]}`;
+                skillsList.appendChild(p);
+            }
+        }
+
+        function attackInDirection() {
+            if (playerLastMoveDirection.lengthSq() === 0) {
+                return false; // No direction
+            }
+
+            const playerX = Math.round(playerPos.x);
+            const playerZ = Math.round(playerPos.z);
+            const dirX = Math.round(playerLastMoveDirection.x);
+            const dirZ = Math.round(playerLastMoveDirection.z);
+            const targetX = playerX + dirX;
+            const targetZ = playerZ + dirZ;
+
+            // Check for bear
+            const bearIndex = bears.findIndex(bear => {
+                if (bear.isDying) return false;
+                const dist = getWrappedDistance(bear.position.x, bear.position.z, targetX + 0.5, targetZ + 0.5);
+                return dist < 1.5;
+            });
+
+            if (bearIndex !== -1) {
+                const bear = bears[bearIndex];
+                bear.health -= (PLAYER_ATTACK_DAMAGE + skills.fighting);
+                bear.healthBar.scale.x = bear.health / BEAR_MAX_HEALTH;
+                if (bear.health <= 0) {
+                    bear.isDying = true;
+                    showNotification("Killed bear!");
+                    levelUpSkill('fighting', 2);
+                } else {
+                    showNotification(`Hit bear! ${bear.health} HP remaining`);
+                }
+                return true; // Attack happened
+            }
+
+            // Check for wolf
+            const wolfIndex = wolves.findIndex(wolf => {
+                if (wolf.isDying) return false;
+                const dist = getWrappedDistance(wolf.position.x, wolf.position.z, targetX + 0.5, targetZ + 0.5);
+                return dist < 1.5;
+            });
+
+            if (wolfIndex !== -1) {
+                const wolf = wolves[wolfIndex];
+                wolf.health -= (PLAYER_ATTACK_DAMAGE + skills.fighting);
+                wolf.healthBar.scale.x = wolf.health / WOLF_MAX_HEALTH;
+                if (wolf.health <= 0) {
+                    wolf.isDying = true;
+                    showNotification("Killed wolf!");
+                    levelUpSkill('fighting', 1);
+                } else {
+                    showNotification(`Hit wolf! ${wolf.health} HP remaining`);
+                }
+                return true; // Attack happened
+            }
+
+            return false; // No attack
+        }
+
         function destroyBlockInDirection() {
             if (!equippedTool || equippedTool.id !== TOOLS.PICKAXE.id) {
                 showNotification("Equip pickaxe first!");
                 return;
+            }
+            if (isPerformingLongAction) {
+                showNotification("Already performing an action.");
+                return;
+            }
+            if (attackInDirection()) {
+                return; // An attack was initiated
             }
             if (playerLastMoveDirection.lengthSq() === 0) {
                 showNotification("Move first to target a block");
@@ -3012,52 +3283,6 @@
             
             const targetX = playerX + dirX;
             const targetZ = playerZ + dirZ;
-
-            // Check for bear first
-            const bearIndex = bears.findIndex(bear => {
-                if (bear.isDying) return false;
-                const dist = Math.sqrt(
-                    Math.pow(bear.position.x - (targetX + 0.5), 2) + 
-                    Math.pow(bear.position.z - (targetZ + 0.5), 2)
-                );
-                return dist < 1.5;
-            });
-
-            if (bearIndex !== -1) {
-                const bear = bears[bearIndex];
-                bear.health -= PLAYER_ATTACK_DAMAGE;
-                
-                if (bear.health <= 0) {
-                    bear.isDying = true;
-                    showNotification("Killed bear!");
-                } else {
-                    showNotification(`Hit bear! ${bear.health} HP remaining`);
-                }
-                return;
-            }
-            
-            // Check for wolf
-            const wolfIndex = wolves.findIndex(wolf => {
-                if (wolf.isDying) return false;
-                const dist = Math.sqrt(
-                    Math.pow(wolf.position.x - (targetX + 0.5), 2) + 
-                    Math.pow(wolf.position.z - (targetZ + 0.5), 2)
-                );
-                return dist < 1.5;
-            });
-
-            if (wolfIndex !== -1) {
-                const wolf = wolves[wolfIndex];
-                wolf.health -= PLAYER_ATTACK_DAMAGE;
-                
-                if (wolf.health <= 0) {
-                    wolf.isDying = true;
-                    showNotification("Killed wolf!");
-                } else {
-                    showNotification(`Hit wolf! ${wolf.health} HP remaining`);
-                }
-                return;
-            }
 
             let targetBlockCoords = null;
 
@@ -3077,36 +3302,43 @@
 
             if (targetBlockCoords) {
                 const { x, y, z } = targetBlockCoords;
-                const blockToDestroyMesh = blockMeshes[x][z][y];
-
-                const materialId = terrain[x][z][y];
-                let destroyedMaterialName = 'Unknown';
-                for (const key in MATERIALS) {
-                    if (MATERIALS[key].id === materialId) {
-                        destroyedMaterialName = MATERIALS[key].name;
-                        break;
-                    }
-                }
-
-                inventory[destroyedMaterialName] = (inventory[destroyedMaterialName] || 0) + 1;
-                updateInventoryUI();
-                saveGameState();
-
-                scene.remove(blockToDestroyMesh);
-                // Dispose geometry from all 9 copies
-                for (const blockCopy of blockToDestroyMesh.children) {
-                    blockCopy.geometry.dispose();
-                }
-                // Don't dispose materials - they are cached and reused
-
-                blockMeshes[x][z][y] = undefined;
-                terrain[x][z][y] = undefined;
-
-                showNotification(`Destroyed ${destroyedMaterialName} block`);
-                updateSurroundingBlockVisibility(x, y, z);
                 
-                // Check if any trees are standing on this block and remove them
-                checkTreesAboveBlock(x, y, z);
+                const onComplete = () => {
+                    const blockToDestroyMesh = blockMeshes[x][z][y];
+                    if (!blockToDestroyMesh) return; // Block already gone
+
+                    const materialId = terrain[x][z][y];
+                    let destroyedMaterialName = 'Unknown';
+                    for (const key in MATERIALS) {
+                        if (MATERIALS[key].id === materialId) {
+                            destroyedMaterialName = MATERIALS[key].name;
+                            break;
+                        }
+                    }
+
+                    inventory[destroyedMaterialName] = (inventory[destroyedMaterialName] || 0) + 1;
+                    updateInventoryUI();
+                    saveGameState();
+
+                    scene.remove(blockToDestroyMesh);
+                    // Dispose geometry from all 9 copies
+                    for (const blockCopy of blockToDestroyMesh.children) {
+                        blockCopy.geometry.dispose();
+                    }
+                    // Don't dispose materials - they are cached and reused
+
+                    blockMeshes[x][z][y] = undefined;
+                    terrain[x][z][y] = undefined;
+
+                    showNotification(`Destroyed ${destroyedMaterialName} block`);
+                    updateSurroundingBlockVisibility(x, y, z);
+                    
+                    // Check if any trees are standing on this block and remove them
+                    checkTreesAboveBlock(x, y, z);
+                };
+                
+                startLongAction('mining', onComplete);
+
             } else {
                 showNotification("No block to destroy");
             }
@@ -3116,6 +3348,13 @@
             if (!equippedTool || equippedTool.id !== TOOLS.AXE.id) {
                 showNotification("Equip axe first!");
                 return;
+            }
+            if (isPerformingLongAction) {
+                showNotification("Already performing an action.");
+                return;
+            }
+            if (attackInDirection()) {
+                return; // An attack was initiated
             }
             if (playerLastMoveDirection.lengthSq() === 0) {
                 showNotification("Move first to target a tree");
@@ -3130,52 +3369,6 @@
 
             const targetX = playerX + dirX;
             const targetZ = playerZ + dirZ;
-
-            // Check for bear first
-            const bearIndex = bears.findIndex(bear => {
-                if (bear.isDying) return false;
-                const dist = Math.sqrt(
-                    Math.pow(bear.position.x - (targetX + 0.5), 2) + 
-                    Math.pow(bear.position.z - (targetZ + 0.5), 2)
-                );
-                return dist < 1.5;
-            });
-
-            if (bearIndex !== -1) {
-                const bear = bears[bearIndex];
-                bear.health -= PLAYER_ATTACK_DAMAGE;
-                
-                if (bear.health <= 0) {
-                    bear.isDying = true;
-                    showNotification("Killed bear!");
-                } else {
-                    showNotification(`Hit bear! ${bear.health} HP remaining`);
-                }
-                return;
-            }
-            
-            // Check for wolf
-            const wolfIndex = wolves.findIndex(wolf => {
-                if (wolf.isDying) return false;
-                const dist = Math.sqrt(
-                    Math.pow(wolf.position.x - (targetX + 0.5), 2) + 
-                    Math.pow(wolf.position.z - (targetZ + 0.5), 2)
-                );
-                return dist < 1.5;
-            });
-
-            if (wolfIndex !== -1) {
-                const wolf = wolves[wolfIndex];
-                wolf.health -= PLAYER_ATTACK_DAMAGE;
-                
-                if (wolf.health <= 0) {
-                    wolf.isDying = true;
-                    showNotification("Killed wolf!");
-                } else {
-                    showNotification(`Hit wolf! ${wolf.health} HP remaining`);
-                }
-                return;
-            }
             
             // Check for bush
             const bushIndex = bushes.findIndex(bush => 
@@ -3203,26 +3396,33 @@
             );
 
             if (treeIndex !== -1) {
-                const tree = trees[treeIndex];
-                const treeType = TREE_TYPES[tree.type];
-                
-                // Add wood and seeds to inventory
-                inventory['Wood'] = (inventory['Wood'] || 0) + tree.wood;
-                inventory['Seeds'] = (inventory['Seeds'] || 0) + tree.seeds;
-                
-                // Set tree to falling state
-                tree.isFalling = true;
-                tree.fallProgress = 0;
-                
-                // Determine fall direction based on player position
-                const dx = playerPos.x - tree.x;
-                tree.fallDirection = dx < 0 ? -1 : 1; // Left or right
-                
-                // Set rotation axis
-                tree.rotationAxis = new THREE.Vector3(0, 0, 1);
-                
-                showNotification(`Cutting ${treeType.name} tree`);
-                updateInventoryUI();
+                const onComplete = () => {
+                    const tree = trees[treeIndex];
+                    if (!tree || tree.isFalling) return;
+
+                    const treeType = TREE_TYPES[tree.type];
+                    
+                    // Add wood and seeds to inventory
+                    inventory['Wood'] = (inventory['Wood'] || 0) + tree.wood;
+                    inventory['Seeds'] = (inventory['Seeds'] || 0) + tree.seeds;
+                    
+                    // Set tree to falling state
+                    tree.isFalling = true;
+                    tree.fallProgress = 0;
+                    
+                    // Determine fall direction based on player position
+                    const dx = playerPos.x - tree.x;
+                    tree.fallDirection = dx < 0 ? -1 : 1; // Left or right
+                    
+                    // Set rotation axis
+                    tree.rotationAxis = new THREE.Vector3(0, 0, 1);
+                    
+                    showNotification(`Cutting ${treeType.name} tree`);
+                    updateInventoryUI();
+                };
+
+                startLongAction('lumberjacking', onComplete);
+
             } else {
                 showNotification("No tree to cut");
             }
@@ -3769,7 +3969,7 @@ showNotification(`Planted a ${TREE_TYPES[treeType].name} sapling`);
 function updateCameraPosition() {
     // distance and height stay the same
     const radius = cameraOffset.length();
-    const height = 1.67;               // adjusted height for zoomed in camera
+    const height = 2.505;               // adjusted height for zoomed in camera
 
     // compute horizontal orbit position
     // Camera follows player position directly (wrapping is handled by player position updates)
@@ -3834,7 +4034,10 @@ function rotateCamera(dir) {
                 stopFishing();
                 return;
             }
-            
+            if (isPerformingLongAction) {
+                showNotification("Already performing an action.");
+                return;
+            }
             if (!isNearWater()) {
                 showNotification("You need to be near water to fish!");
                 return;
@@ -3842,24 +4045,19 @@ function rotateCamera(dir) {
             
             isFishing = true;
             fishingState = 'casting';
-            fishingStartTime = Date.now();
             
-            // Start casting animation
             currentAnimation = playerAnimationsWithFishingRod.castingFront;
             currentAnimation.play();
-            
             showNotification("Casting line...");
             
-            // After casting animation completes, start waiting
             setTimeout(() => {
                 if (isFishing && fishingState === 'casting') {
                     fishingState = 'waiting';
                     currentAnimation = playerAnimationsWithFishingRod.waitingFront;
                     currentAnimation.play();
-                    
-                    // Set random wait time between 5-20 seconds
-                    fishingWaitTime = 5000 + Math.random() * 15000; // 5-20 seconds
                     showNotification("Waiting for a fish to bite...");
+                    
+                    startLongAction('fishing', finishFishing);
                 }
             }, 800); // Casting animation duration
         }
@@ -3879,42 +4077,24 @@ function rotateCamera(dir) {
             showNotification("Stopped fishing");
         }
         
-        function checkForFish() {
-            if (!isFishing || fishingState !== 'waiting') return;
+        function finishFishing() {
+            if (!isFishing) return;
+
+            fishingState = 'bite';
+            currentAnimation = playerAnimationsWithFishingRod.fishBiteFront;
+            currentAnimation.play();
             
-            const now = Date.now();
-            const timeSinceStart = now - fishingStartTime;
+            showNotification("A fish bit! Catching it...");
             
-            if (timeSinceStart >= fishingWaitTime) {
-                // Fish bite!
-                fishingState = 'bite';
-                currentAnimation = playerAnimationsWithFishingRod.fishBiteFront;
-                currentAnimation.play();
-                
-                showNotification("A fish bit! Quick!");
-                
-                // Give player 2 seconds to react
-                setTimeout(() => {
-                    if (isFishing && fishingState === 'bite') {
-                        // Player missed the fish
-                        fishingState = 'waiting';
-                        currentAnimation = playerAnimationsWithFishingRod.waitingFront;
-                        currentAnimation.play();
-                        
-                        // Reset wait time
-                        fishingWaitTime = 5000 + Math.random() * 15000;
-                        fishingStartTime = Date.now();
-                        showNotification("The fish got away! Waiting again...");
-                    }
-                }, 2000);
-            }
+            setTimeout(() => {
+                if (isFishing && fishingState === 'bite') {
+                    catchFish();
+                }
+            }, 800);
         }
         
         function catchFish() {
-            if (!isFishing || fishingState !== 'bite') {
-                showNotification("No fish to catch!");
-                return;
-            }
+            if (!isFishing) return;
             
             fishingState = 'catching';
             currentAnimation = playerAnimationsWithFishingRod.catchingFront;
@@ -3991,23 +4171,7 @@ rotateCamera( 1)
                 keys[event.code] = false;
             });
 
-renderer.domElement.addEventListener('wheel', (event) => {
-    event.preventDefault();
-    const zoomSpeed = 0.2;
-    const dir = event.deltaY > 0 ? 1 : -1;
 
-    let newRadius = cameraOffset.length() + dir * zoomSpeed;
-    newRadius = Math.max(1.5, Math.min(50, newRadius));
-
-    // rebuild the offset vector so the angle is preserved
-    cameraOffset.set(
-        newRadius * Math.cos(cameraAngle),
-        1.67,                                // adjusted height for zoomed in camera
-        newRadius * Math.sin(cameraAngle)
-    );
-
-    updateCameraPosition();
-});
             
             // Plant tree/bush button
             document.getElementById('plantButton').addEventListener('click', () => {
@@ -4030,6 +4194,32 @@ renderer.domElement.addEventListener('wheel', (event) => {
             // Sleep button
             document.getElementById('sleepButton').addEventListener('click', () => {
                 sleepPlayer();
+            });
+
+            document.getElementById('leftMenuToggle').addEventListener('click', () => {
+                const leftMenu = document.getElementById('leftMenu');
+                leftMenu.classList.toggle('open');
+                const toggleButton = document.getElementById('leftMenuToggle');
+                if (leftMenu.classList.contains('open')) {
+                    toggleButton.innerHTML = '&lt;';
+                    toggleButton.style.left = '250px'; // menu width
+                } else {
+                    toggleButton.innerHTML = '&gt;';
+                    toggleButton.style.left = '0px';
+                }
+            });
+
+            document.getElementById('rightMenuToggle').addEventListener('click', () => {
+                const rightMenu = document.getElementById('rightMenu');
+                rightMenu.classList.toggle('open');
+                const toggleButton = document.getElementById('rightMenuToggle');
+                if (rightMenu.classList.contains('open')) {
+                    toggleButton.innerHTML = '&gt;';
+                    toggleButton.style.right = '250px';
+                } else {
+                    toggleButton.innerHTML = '&lt;';
+                    toggleButton.style.right = '0px';
+                }
             });
             
             // Auto-save every 30 seconds
@@ -4112,6 +4302,7 @@ renderer.domElement.addEventListener('wheel', (event) => {
             updateBushes(); // Update bush billboarding and regrowth
             updateRain(deltaTime); // Update rain system and damage
             updateDayNightCycle(); // Update day/night cycle and lighting
+            updateLongAction();
             
             // Make player sprite parallel to viewing plane
             if (playerSprite) {
@@ -4155,8 +4346,8 @@ renderer.domElement.addEventListener('wheel', (event) => {
         
         // Calculate new position
         const newPos = playerPos.clone().add(velocity);
-        const newX = Math.round(newPos.x);
-        const newZ = Math.round(newPos.z);
+        const newX = Math.floor(newPos.x);
+        const newZ = Math.floor(newPos.z);
         
         // Current position
         const currentX = Math.round(playerPos.x);
@@ -4173,28 +4364,21 @@ renderer.domElement.addEventListener('wheel', (event) => {
         const blockAtStepUp = getTerrainBlock(newX, newZ, currentFeetY + 1) !== undefined;
         const blockAboveStepUp = getTerrainBlock(newX, newZ, currentFeetY + 2) !== undefined;
         
-        // Check for water at the destination - check multiple levels to be more thorough
-        // Also check adjacent positions to expand collision boundary by one block
-        let isWaterDestination = false;
-        for (let dy = -1; dy <= 2; dy++) {
-            const checkY = currentFeetY + dy;
-            // Check the target position and adjacent positions
-            for (let dx = -1; dx <= 1; dx++) {
-                for (let dz = -1; dz <= 1; dz++) {
-                    const checkX = newX + dx;
-                    const checkZ = newZ + dz;
-                    if (getTerrainBlock(checkX, checkZ, checkY) === MATERIALS.WATER.id) {
-                        isWaterDestination = true;
-                        break;
-                    }
-                }
-                if (isWaterDestination) break;
-            }
-            if (isWaterDestination) break;
-        }
+        // WATER COLLISION: Stop exactly at water's edge
+        // Check if moving towards water by looking at destination only
         
-        // Prevent walking on water
-        if (isWaterDestination) {
+        // Check the block at the destination position
+        const destBlock = getTerrainBlock(newX, newZ, currentFeetY);
+        const destBlockBelow = getTerrainBlock(newX, newZ, currentFeetY - 1);
+        
+        // STOP if the destination itself is water
+        // This allows player to get right up to the edge (1 block away) but not onto water
+        const isDestWater = destBlock === MATERIALS.WATER.id ||
+                           destBlockBelow === MATERIALS.WATER.id ||
+                           (destBlock === undefined && destBlockBelow === MATERIALS.WATER.id);
+                           
+        // Prevent movement only if destination is water
+        if (isDestWater) {
             canMove = false;
         }
         else if (blockAtCurrentLevel && blockAtHeadLevel) {
