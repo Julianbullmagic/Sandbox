@@ -398,6 +398,12 @@
         <div id="inventory">
             <h3>Inventory</h3>
             <div class="inventory-section">
+                <h4>Game State</h4>
+                <button id="saveButton" class="action-button">Save Game</button>
+                <input type="file" id="loadInput" style="display: none;">
+                <button id="loadButton" class="action-button">Load Game</button>
+            </div>
+            <div class="inventory-section">
                 <h4>Materials</h4>
                 <div id="materialInventory"></div>
             </div>
@@ -4206,6 +4212,203 @@ function rotateCamera(dir) {
             }, 1000);
         }
         
+        function loadState(gameState) {
+            // 1. Clear existing scene and state
+            showNotification("Loading new world...", 1000);
+
+            // Remove all game objects from the scene
+            for (let x in blockMeshes) {
+                for (let z in blockMeshes[x]) {
+                    for (let y in blockMeshes[x][z]) {
+                        if (blockMeshes[x][z][y]) scene.remove(blockMeshes[x][z][y]);
+                    }
+                }
+            }
+            trees.forEach(t => scene.remove(t.group));
+            bushes.forEach(b => scene.remove(b.group));
+            bears.forEach(b => scene.remove(b.group));
+            wolves.forEach(w => scene.remove(w.group));
+
+            // Reset state arrays
+            trees = [];
+            bushes = [];
+            bears = [];
+            wolves = [];
+            blockMeshes = [];
+            terrain = [];
+
+            // 2. Restore simple variables
+            playerPos.set(gameState.playerPos.x, gameState.playerPos.y, gameState.playerPos.z);
+            inventory = gameState.inventory;
+            health = gameState.health;
+            hunger = gameState.hunger;
+            skills = gameState.skills;
+            gameStartTime = gameState.gameStartTime;
+            lastRainCycle = gameState.lastRainCycle;
+            isRaining = gameState.isRaining;
+            rainStartTime = gameState.rainStartTime;
+
+            // 3. Rebuild the world
+            terrain = gameState.terrain;
+            for(let x = 0; x < worldSize; x++) {
+                blockMeshes[x] = [];
+                for(let z = 0; z < worldSize; z++) {
+                    blockMeshes[x][z] = [];
+                }
+            }
+
+            // Re-create blocks
+            for (let x = 0; x < worldSize; x++) {
+                for (let z = 0; z < worldSize; z++) {
+                    if (!terrain[x] || !terrain[x][z]) continue;
+                    for (let y = 0; y < worldSize; y++) {
+                        const matId = terrain[x][z][y];
+                        if (matId !== undefined) {
+                            const materialType = Object.values(MATERIALS).find(m => m.id === matId);
+                            if (materialType && isBlockVisibleRuntime(x, y, z)) {
+                                blockMeshes[x][z][y] = createBlock(x, y, z, materialType);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Re-create trees, bushes, animals
+            gameState.trees.forEach(t => createTreeFromSave(t));
+            gameState.bushes.forEach(b => createBushFromSave(b));
+            // Note: Animal creation from save is simplified, would need more complex functions for full state
+            // For now, we just respawn them. A full implementation would need createBearFromSave etc.
+            generateBears(); 
+            generateWolves();
+
+            // 4. Final UI/State Updates
+            updateInventoryUI();
+            updateStatsUI();
+            updateSkillsUI();
+            updateCameraPosition();
+            showNotification("Game Loaded!", 2000);
+        }
+        
+        function createTreeFromSave(treeData) {
+            const treeGroup = createTreeMesh(treeData.type);
+            const scale = (0.5 + (treeData.growthStage / 10) * 0.5) * treeData.sizeVariation;
+            treeGroup.scale.set(scale, scale, 1);
+
+            const treeParent = new THREE.Group();
+            for (let offsetX = -1; offsetX <= 1; offsetX++) {
+                for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
+                    const treeCopy = treeGroup.clone();
+                    treeCopy.position.set(treeData.x + offsetX * worldSize, treeData.y, treeData.z + offsetZ * worldSize);
+                    treeParent.add(treeCopy);
+                }
+            }
+            scene.add(treeParent);
+
+            if (treeData.isFruitTree && !treeData.fruitPicked) {
+                for (const treeCopy of treeParent.children) {
+                    updateTreeTexture(treeCopy.children[0], treeData.type, true);
+                }
+            }
+
+            trees.push({
+                ...treeData,
+                position: new THREE.Vector3(treeData.x + 0.5, treeData.y + 2.5, treeData.z + 0.5),
+                group: treeParent,
+                mesh: treeParent.children[4].children[0],
+                isFalling: false, fallProgress: 0, fallDirection: 1,
+            });
+        }
+
+        function createBushFromSave(bushData) {
+            const bushGeo = new THREE.PlaneGeometry(1.0, 1.0);
+            const bushTex = bushTexture.clone();
+            bushTex.needsUpdate = true;
+            const frameH = 1 / 5;
+            bushTex.repeat.set(1, frameH);
+            bushTex.offset.set(0, 1 - (bushData.type + 1) * frameH);
+            const bushMat = new THREE.MeshBasicMaterial({ map: bushTex, transparent: true, side: THREE.FrontSide, depthTest: true, depthWrite: false });
+            
+            const bushGroup = new THREE.Group();
+            for (let offsetX = -1; offsetX <= 1; offsetX++) {
+                for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
+                    const bushMesh = new THREE.Mesh(bushGeo, bushMat.clone());
+                    bushMesh.position.set(bushData.x + offsetX * worldSize, bushData.y + 1.0, bushData.z + offsetZ * worldSize);
+                    bushGroup.add(bushMesh);
+                }
+            }
+            scene.add(bushGroup);
+
+            if (bushData.harvested) {
+                bushGroup.visible = false;
+            }
+
+            bushes.push({
+                ...bushData,
+                group: bushGroup,
+                mesh: bushGroup.children[4],
+                position: new THREE.Vector3(bushData.x, bushData.y + 1.0, bushData.z),
+            });
+        }
+
+        function downloadSaveGame() {
+            const gameState = {
+                playerPos: { x: playerPos.x, y: playerPos.y, z: playerPos.z },
+                inventory: inventory,
+                health: health,
+                hunger: hunger,
+                skills: skills,
+                gameStartTime: gameStartTime,
+                lastRainCycle: lastRainCycle,
+                isRaining: isRaining,
+                rainStartTime: rainStartTime,
+                terrain: terrain,
+                trees: trees.map(t => ({
+                    x: t.x, y: t.y, z: t.z,
+                    type: t.type,
+                    wood: t.wood,
+                    seeds: t.seeds,
+                    plantedTime: t.plantedTime,
+                    growthStage: t.growthStage,
+                    sizeVariation: t.sizeVariation,
+                    isFruitTree: t.isFruitTree,
+                    fruit: t.fruit,
+                    fruitPicked: t.fruitPicked,
+                    fruitPickTime: t.fruitPickTime,
+                    maxFruit: t.maxFruit
+                })),
+                bushes: bushes.map(b => ({
+                    x: b.x, y: b.y, z: b.z,
+                    type: b.type,
+                    isMedicinalHerb: b.isMedicinalHerb,
+                    harvested: b.harvested,
+                    harvestTime: b.harvestTime
+                })),
+                bears: bears.map(b => ({
+                    x: b.position.x, y: b.position.y, z: b.position.z,
+                    health: b.health,
+                    state: b.state
+                })),
+                wolves: wolves.map(w => ({
+                    x: w.position.x, y: w.position.y, z: w.position.z,
+                    health: w.health,
+                    state: w.state
+                }))
+            };
+
+            const jsonString = JSON.stringify(gameState); // Using compact format for smaller file size
+            const blob = new Blob([jsonString], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement('a');
+a.href = url;
+            a.download = `sandbox-save-${Date.now()}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showNotification("Game Saved!");
+        }
+
         function setupControls() {
             document.addEventListener('keydown', (event) => {
                 keys[event.code] = true;
@@ -4284,6 +4487,28 @@ rotateCamera( 1)
                 equippedTool = null;
                 updateInventoryUI();
                 showNotification("Select a spot and press ALT to plant");
+            });
+
+            // Save/Load buttons
+            document.getElementById('saveButton').addEventListener('click', downloadSaveGame);
+            document.getElementById('loadButton').addEventListener('click', () => {
+                document.getElementById('loadInput').click();
+            });
+            document.getElementById('loadInput').addEventListener('change', (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const gameState = JSON.parse(e.target.result);
+                        loadState(gameState);
+                    } catch (error) {
+                        console.error("Failed to parse save file:", error);
+                        showNotification("Error: Invalid save file.", 3000);
+                    }
+                };
+                reader.readAsText(file);
             });
             
             // Sleep button
