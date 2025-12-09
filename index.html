@@ -441,7 +441,6 @@
     <div id="gameOver">
         <h1>GAME OVER</h1>
         <p id="deathReason">You died!</p>
-        <button onclick="location.reload()">Restart</button>
     </div>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -457,8 +456,7 @@
         let cachedRockMaterial = null;
         let cachedMetalMaterial = null;
         let cachedWoodMaterial = null;
-        let cachedWaterMaterial = null;
-        let noiseScale = 0.05;
+        let cachedWaterMaterial = null, cachedWaterMaterialTop = null;        let noiseScale = 0.05;
         let playerPos = new THREE.Vector3(30, 0, 30); // Center of 60x60 world
         let keys = {};
         let cameraAngle = 0;        // radians around the player
@@ -552,7 +550,7 @@
         let lastNightDamageTime = 0;
         
         // Material textures
-        let grassTexture, soilTexture, rockTexture, metalTexture, woodTexture, waterTexture;
+        let grassTexture, soilTexture, rockTexture, metalTexture, woodTexture, waterTexture, waterTopTexture;
         
         // Bushes
         let bushes = [];
@@ -990,6 +988,8 @@
             waterTexture.minFilter = THREE.NearestFilter;
             waterTexture.magFilter = THREE.NearestFilter;
             
+            waterTopTexture = waterTexture.clone();
+            
             generateTerrain();
             generateTrees(treeTexture);
             validateTrees(); // Remove any floating trees
@@ -1092,7 +1092,11 @@
             const deathReasonP = document.getElementById('deathReason');
             deathReasonP.textContent = reason;
             gameOverDiv.style.display = 'block';
-            saveGameState(); // Save final state
+
+            // Automatically reset the game after 3 seconds
+            setTimeout(() => {
+                location.reload();
+            }, 3000);
         }
         
         function createRainSystem() {
@@ -2307,11 +2311,15 @@
         const sizeVariation = 0.7 + Math.random() * 0.6;
         treeGroup.scale.set(sizeVariation, sizeVariation, 1);
         
+        const yOffsetRatio = treeSpriteOffsets[treeType] || 0;
+        const yOffsetPixels = yOffsetRatio * 5.0;
+        const finalY = topY + 0.5 + yOffsetPixels * sizeVariation;
+
         const treeParent = new THREE.Group();
         for (let offsetX = -1; offsetX <= 1; offsetX++) {
             for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
                 const treeCopy = treeGroup.clone();
-                treeCopy.position.set(x + offsetX * worldSize, topY + 0.5, z + offsetZ * worldSize);
+                treeCopy.position.set(x + offsetX * worldSize, finalY, z + offsetZ * worldSize);
                 treeParent.add(treeCopy);
             }
         }
@@ -2987,10 +2995,18 @@
                     cachedWaterMaterial = new THREE.MeshLambertMaterial({
                         map: waterTexture,
                         transparent: true,
-                        opacity: 0.8
+                        opacity: 0.7
                     });
                 }
                 blockMaterial = cachedWaterMaterial;
+
+                if (!cachedWaterMaterialTop) {
+                    cachedWaterMaterialTop = new THREE.MeshLambertMaterial({
+                        map: waterTopTexture,
+                        transparent: true,
+                        opacity: 0.4
+                    });
+                }
             } else {
                 blockMaterial = new THREE.MeshLambertMaterial({ color: materialType.color });
             }
@@ -3008,6 +3024,14 @@
                         z + offsetZ * worldSize
                     );
                     blockGroup.add(block);
+
+                    if (materialType.id === MATERIALS.WATER.id) {
+                        const planeGeo = new THREE.PlaneGeometry(blockSize, blockSize);
+                        const topPlane = new THREE.Mesh(planeGeo, cachedWaterMaterialTop);
+                        topPlane.rotation.x = -Math.PI / 2;
+                        topPlane.position.set(x + offsetX * worldSize, y + 0.501, z + offsetZ * worldSize);
+                        blockGroup.add(topPlane);
+                    }
                 }
             }
             
@@ -3870,11 +3894,16 @@ const sizeVariation = 0.7 + Math.random() * 0.6;
 treeGroup.scale.set(sizeVariation * initialScaleFactor, sizeVariation * initialScaleFactor, 1);
 
 // Create a parent group to hold 9 copies for seamless wrapping
+const yOffsetRatio = treeSpriteOffsets[treeType] || 0;
+const yOffsetPixels = yOffsetRatio * 5.0;
+const finalScale = sizeVariation * initialScaleFactor;
+const finalY = topY + 0.5 + yOffsetPixels * finalScale;
+
 const treeParent = new THREE.Group();
 for (let offsetX = -1; offsetX <= 1; offsetX++) {
     for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
         const treeCopy = treeGroup.clone();
-        treeCopy.position.set(targetX + offsetX * worldSize, topY + 0.5, targetZ + offsetZ * worldSize);
+        treeCopy.position.set(targetX + offsetX * worldSize, finalY, targetZ + offsetZ * worldSize);
         treeParent.add(treeCopy);
     }
 }
@@ -4718,6 +4747,7 @@ rotateCamera( 1)
             updateBears(deltaTime); // Update bear AI and attacks
             updateWolves(deltaTime); // Update wolf AI and attacks
             updateBushes(); // Update bush billboarding and regrowth
+            animateWater(deltaTime);
             updateRain(deltaTime); // Update rain system and damage
             updateDayNightCycle(); // Update day/night cycle and lighting
             updateLongAction();
@@ -4735,6 +4765,17 @@ rotateCamera( 1)
             renderer.render(scene, camera);
         }
 
+
+        function animateWater(deltaTime) {
+    if (waterTexture) {
+        waterTexture.offset.x += deltaTime * 0.01;
+        waterTexture.offset.y += deltaTime * 0.005;
+    }
+    if (waterTopTexture) {
+        waterTopTexture.offset.x -= deltaTime * 0.005;
+        waterTopTexture.offset.y -= deltaTime * 0.01;
+    }
+}
 
         function updateObjectTransparency() {
             const playerDistToCamera = player.position.distanceTo(camera.position);
