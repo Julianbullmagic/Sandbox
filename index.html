@@ -628,6 +628,9 @@
         let playerFacing = 'front';
         let playerFlipX = false;
 
+        // Tree sprite visual offsets
+        let treeSpriteOffsets = [];
+
         // Tree properties
         const TREE_TYPES = [
             { id: 0, name: "Oak", minWood: 3, maxWood: 5, minSeeds: 1, maxSeeds: 3 },
@@ -705,6 +708,53 @@
                     }
                     this.updateFrame(this.currentFrame);
                 }
+            }
+        }
+        
+        function calculateTreeSpriteOffsets() {
+            const canvas = globalTreeTexture.image;
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            if (!ctx) {
+                console.error("Could not get 2D context from texture canvas.");
+                return;
+            }
+            const atlasWidth = canvas.width;
+            const atlasHeight = canvas.height;
+
+            const cols = 4, rows = 2;
+            const subImageWidth = atlasWidth / cols;
+            const subImageHeight = atlasHeight / rows;
+
+            for (let i = 0; i < TREE_TYPES.length; i++) {
+                const col = i % cols;
+                const row = Math.floor(i / rows);
+
+                const startX = col * subImageWidth;
+                const startY = row * subImageHeight;
+
+                const imageData = ctx.getImageData(startX, startY, subImageWidth, subImageHeight);
+                const data = imageData.data;
+
+                let lowestY = subImageHeight;
+
+                for (let y = subImageHeight - 1; y >= 0; y--) {
+                    let rowHasPixel = false;
+                    for (let x = 0; x < subImageWidth; x++) {
+                        const alpha = data[(y * subImageWidth + x) * 4 + 3];
+                        if (alpha > 50) { // Using a threshold to ignore barely visible pixels
+                            lowestY = y;
+                            rowHasPixel = true;
+                            break; 
+                        }
+                    }
+                    if (rowHasPixel) {
+                        break;
+                    }
+                }
+                
+                // Calculate the offset from the bottom of the sprite box
+                const offset = (subImageHeight - 1 - lowestY) / subImageHeight;
+                treeSpriteOffsets[i] = offset > 0 ? offset : 0;
             }
         }
         
@@ -886,6 +936,8 @@
             const treeTexture = await loadTextureDownsampled('https://res.cloudinary.com/julianbullmagic/image/upload/v1749694431/set-variety-trees-transparent-background_vr8wak.png', 4);
             globalTreeTexture = treeTexture; // Store globally for tree planting
             
+            calculateTreeSpriteOffsets();
+
             // Load tree with fruit texture - downsampled 4x for performance
             const treeWithFruitTexture = await loadTextureDownsampled('https://res.cloudinary.com/julianbullmagic/image/upload/v1759239290/trees_ism7np.png', 4);
             globalTreeWithFruitTexture = treeWithFruitTexture; // Store globally for tree planting
@@ -2255,12 +2307,11 @@
         const sizeVariation = 0.7 + Math.random() * 0.6;
         treeGroup.scale.set(sizeVariation, sizeVariation, 1);
         
-        // Create a parent group to hold 9 copies for seamless wrapping
         const treeParent = new THREE.Group();
         for (let offsetX = -1; offsetX <= 1; offsetX++) {
             for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
                 const treeCopy = treeGroup.clone();
-                treeCopy.position.set(x + offsetX * worldSize, topY, z + offsetZ * worldSize);
+                treeCopy.position.set(x + offsetX * worldSize, topY + 0.5, z + offsetZ * worldSize);
                 treeParent.add(treeCopy);
             }
         }
@@ -2279,7 +2330,7 @@
 
         trees.push({
             x, z, y: topY,  // Store the position at terrain level
-            position: new THREE.Vector3(x + 0.5, topY + 2.5, z + 0.5),
+            position: new THREE.Vector3(x + 0.5, topY + 3.0, z + 0.5),
             type: treeType,
             group: treeParent,
             mesh: treeParent.children[4].children[0], // Center copy (index 4 in 3x3 grid)
@@ -3590,14 +3641,13 @@
         }
 
         if (!tree.isFalling) {
-            // Make trees parallel to viewing plane
+            // Make trees billboard to a point 100m behind the camera
             for (const treeCopy of tree.group.children) {
-                const treeMesh = treeCopy.children[0];
                 const angle = Math.atan2(
-                    camera.position.x - treeMesh.position.x - treeCopy.position.x,
-                    camera.position.z - treeMesh.position.z - treeCopy.position.z
+                    billboardTargetPoint.x - treeCopy.position.x,
+                    billboardTargetPoint.z - treeCopy.position.z
                 );
-                treeMesh.rotation.y = angle;
+                treeCopy.rotation.y = angle;
             }
             continue;
         }
@@ -3681,14 +3731,18 @@ function createTreeMesh(typeId) {
     const mat = new THREE.MeshBasicMaterial({
         map: tex,
         transparent: true,
-        side: THREE.FrontSide,  // Changed from DoubleSide to prevent overlap transparency issues
+        side: THREE.FrontSide,
         depthTest: true,
-        depthWrite: false  // Don't write to depth buffer to prevent z-fighting
+        depthWrite: false
     });
     // Apply a random tint so trees vary in color subtly
     mat.color.set(randomTreeTint());
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(0, 2.5, 0);   // center at 2.5, so bottom at 0 (tree is 5.0 tall)
+
+    // Get the calculated offset and apply it
+    const yOffset = (treeSpriteOffsets[typeId] || 0) * 5.0; // 5.0 is plane height
+    mesh.position.set(0, 2.5 - yOffset, 0);   // center at 2.5, then shift down by offset
+
     const group = new THREE.Group();
     group.add(mesh);
     return group;
@@ -3820,7 +3874,7 @@ const treeParent = new THREE.Group();
 for (let offsetX = -1; offsetX <= 1; offsetX++) {
     for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
         const treeCopy = treeGroup.clone();
-        treeCopy.position.set(targetX + offsetX * worldSize, topY, targetZ + offsetZ * worldSize);
+        treeCopy.position.set(targetX + offsetX * worldSize, topY + 0.5, targetZ + offsetZ * worldSize);
         treeParent.add(treeCopy);
     }
 }
@@ -3839,7 +3893,7 @@ scene.add(treeParent);
 
 trees.push({
     x: targetX, z: targetZ, y: topY,
-    position: new THREE.Vector3(targetX + 0.5, topY + 2.5, targetZ + 0.5),
+    position: new THREE.Vector3(targetX + 0.5, topY + 3.0, targetZ + 0.5),
     type: treeType,
     group: treeParent,
     mesh: treeParent.children[4].children[0], // Center copy
@@ -4298,7 +4352,7 @@ function rotateCamera(dir) {
             for (let offsetX = -1; offsetX <= 1; offsetX++) {
                 for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
                     const treeCopy = treeGroup.clone();
-                    treeCopy.position.set(treeData.x + offsetX * worldSize, treeData.y, treeData.z + offsetZ * worldSize);
+                    treeCopy.position.set(treeData.x + offsetX * worldSize, treeData.y + 0.5, treeData.z + offsetZ * worldSize);
                     treeParent.add(treeCopy);
                 }
             }
@@ -4312,43 +4366,80 @@ function rotateCamera(dir) {
 
             trees.push({
                 ...treeData,
-                position: new THREE.Vector3(treeData.x + 0.5, treeData.y + 2.5, treeData.z + 0.5),
+                position: new THREE.Vector3(treeData.x + 0.5, treeData.y + 3.0, treeData.z + 0.5),
                 group: treeParent,
                 mesh: treeParent.children[4].children[0],
                 isFalling: false, fallProgress: 0, fallDirection: 1,
             });
         }
 
-        function createBushFromSave(bushData) {
-            const bushGeo = new THREE.PlaneGeometry(1.0, 1.0);
-            const bushTex = bushTexture.clone();
-            bushTex.needsUpdate = true;
-            const frameH = 1 / 5;
-            bushTex.repeat.set(1, frameH);
-            bushTex.offset.set(0, 1 - (bushData.type + 1) * frameH);
-            const bushMat = new THREE.MeshBasicMaterial({ map: bushTex, transparent: true, side: THREE.FrontSide, depthTest: true, depthWrite: false });
-            
-            const bushGroup = new THREE.Group();
-            for (let offsetX = -1; offsetX <= 1; offsetX++) {
-                for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
-                    const bushMesh = new THREE.Mesh(bushGeo, bushMat.clone());
-                    bushMesh.position.set(bushData.x + offsetX * worldSize, bushData.y + 1.0, bushData.z + offsetZ * worldSize);
-                    bushGroup.add(bushMesh);
-                }
-            }
-            scene.add(bushGroup);
+                        function createBushFromSave(bushData) {
 
-            if (bushData.harvested) {
-                bushGroup.visible = false;
-            }
+                            const bushGeo = new THREE.PlaneGeometry(1.0, 1.0);
 
-            bushes.push({
-                ...bushData,
-                group: bushGroup,
-                mesh: bushGroup.children[4],
-                position: new THREE.Vector3(bushData.x, bushData.y + 1.0, bushData.z),
-            });
-        }
+                            const bushTex = bushTexture.clone();
+
+                            bushTex.needsUpdate = true;
+
+                            const frameH = 1 / 5;
+
+                            bushTex.repeat.set(1, frameH);
+
+                            bushTex.offset.set(0, 1 - (bushData.type + 1) * frameH);
+
+                            const bushMat = new THREE.MeshBasicMaterial({ map: bushTex, transparent: true, side: THREE.FrontSide, depthTest: true, depthWrite: false });
+
+                            
+
+                            const bushGroup = new THREE.Group();
+
+                            for (let offsetX = -1; offsetX <= 1; offsetX++) {
+
+                                for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
+
+                                    const bushMesh = new THREE.Mesh(bushGeo, bushMat.clone());
+
+                                    bushMesh.position.set(
+
+                                        bushData.x + offsetX * worldSize,
+
+                                        bushData.y + 1.0,
+
+                                        bushData.z + offsetZ * worldSize
+
+                                    );
+
+                                    bushGroup.add(bushMesh);
+
+                                }
+
+                            }
+
+                            scene.add(bushGroup);
+
+                
+
+                            if (bushData.harvested) {
+
+                                bushGroup.visible = false;
+
+                            }
+
+                
+
+                            bushes.push({
+
+                                ...bushData,
+
+                                group: bushGroup,
+
+                                mesh: bushGroup.children[4],
+
+                                position: new THREE.Vector3(bushData.x, bushData.y + 1.0, bushData.z),
+
+                            });
+
+                        }
 
         function downloadSaveGame() {
             const gameState = {
@@ -4605,12 +4696,19 @@ rotateCamera( 1)
             }
         }
 
+        let billboardTargetPoint = new THREE.Vector3();
+
         function animate() {
             requestAnimationFrame(animate);
             
             const currentTime = performance.now();
             const deltaTime = (currentTime - lastAnimationTime) / 1000;
             lastAnimationTime = currentTime;
+
+            // Calculate the point 100m behind the camera for billboarding
+            camera.getWorldDirection(billboardTargetPoint);
+            billboardTargetPoint.multiplyScalar(-100);
+            billboardTargetPoint.add(camera.position);
             
             handleMovement();
             updatePlayerAnimation(deltaTime);
@@ -4651,43 +4749,32 @@ rotateCamera( 1)
                 let targetOpacity = 1.0;
                 let makeTransparent = false;
 
-                if (objDistToCamera < playerDistToCamera - 1.0) { // -1.0 to give a bit of a buffer
+                if (objDistToCamera < playerDistToCamera - 1.0) {
                     makeTransparent = true;
-                    // Opacity based on how close the object is to the camera vs the player
-                    const closeness = (objDistToCamera / (playerDistToCamera - 1.0));
-                    targetOpacity = 0.2 + Math.pow(closeness, 2) * 0.8; // from 0.2 to 1.0. Using Math.pow to make it faster
-                    targetOpacity = Math.max(0.2, Math.min(1.0, targetOpacity));
+                    const closeness = objDistToCamera / (playerDistToCamera - 1.0);
+                    targetOpacity = Math.pow(closeness, 2);
+                    targetOpacity = Math.max(0.0, Math.min(1.0, targetOpacity));
                 }
 
                 const processGroup = (group) => {
                     for (const child of group.children) {
                         if (child.isMesh) {
                             const material = child.material;
-                            if (makeTransparent) {
-                                material.transparent = true;
-                                if (material.opacity > targetOpacity) {
-                                    material.opacity -= 0.2; // Fade out faster
-                                    if (material.opacity < targetOpacity) material.opacity = targetOpacity;
-                                } else if (material.opacity < targetOpacity) {
-                                    material.opacity += 0.2; // Fade in to target faster
-                                    if (material.opacity > targetOpacity) material.opacity = targetOpacity;
-                                }
-                            } else {
-                                // This assumes original opacity is 1.0
-                                if (material.opacity < 1.0) {
-                                    material.opacity += 0.2; // Fade in faster
-                                    if (material.opacity > 1.0) material.opacity = 1.0;
-                                }
-                            }
                             
-                            // Key change: only disable depthWrite when actually transparent
-                            if (material.opacity < 1.0) {
+                            const newOpacity = makeTransparent ? targetOpacity : 1.0;
+                            
+                            if (Math.abs(material.opacity - newOpacity) > 0.01) {
+                                material.opacity = THREE.MathUtils.lerp(material.opacity, newOpacity, 0.1);
+                            } else {
+                                material.opacity = newOpacity;
+                            }
+
+                            if (material.opacity < 0.99) {
                                 material.depthWrite = false;
-                                material.transparent = true;
                             } else {
                                 material.depthWrite = true;
-                                material.transparent = true; // Keep it true to avoid render order issues
                             }
+                            material.transparent = true;
 
                         } else if (child.isGroup) {
                             processGroup(child);
