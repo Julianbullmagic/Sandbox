@@ -387,7 +387,10 @@
                     Use Herb: <span class="key">H</span>
                 </div>
                 <div class="control-item">
-                    Sleep (Night): <span class="key">Z</span>
+                    Jump: <span class="key">Z</span>
+                </div>
+                <div class="control-item">
+                    Sleep (Night): <span class="key">N</span>
                 </div>
             </div>
         </div>
@@ -465,11 +468,12 @@
         const rotationSpeed = 0.03; // radians per key-press
         let playerLastMoveDirection = new THREE.Vector3(0, 0, 0);
         let inventory = {};
-        let selectedMaterial = null;
+        let selectedMaterials = new Set(); // Changed from single selectedMaterial to Set
         const TOOLS = {
             PICKAXE: { id: 0, name: 'Pickaxe' },
             AXE: { id: 1, name: 'Axe' },
-            FISHING_ROD: { id: 2, name: 'Fishing Rod' }
+            FISHING_ROD: { id: 2, name: 'Fishing Rod' },
+            SWORD: { id: 3, name: 'Sword' }
         };
         let equippedTool = null;
         let playerAnimationsWithPickaxe = {
@@ -488,6 +492,14 @@
             runBack: null,
             cuttingFront: null,
             cuttingBack: null
+        };
+        let playerAnimationsWithSword = {
+            idleFront: null,
+            idleBack: null,
+            runFront: null,
+            runBack: null,
+            attackFront: null,
+            attackBack: null
         };
         let playerAnimationsWithFishingRod = {
             idleFront: null,
@@ -508,12 +520,19 @@
         let fishingWaitTime = 0;
         let fishingState = 'idle'; // 'idle', 'casting', 'waiting', 'bite', 'catching'
 
+        // Campfires
+        let campfires = [];
+        let campfireTexture;
+        let campfireAnimation = null;
+
         // Player Skills
         let skills = {
             mining: 0,
             fishing: 0,
             lumberjacking: 0,
-            fighting: 0
+            fighting: 0,
+            manufacturing: 0,
+            construction: 0
         };
         const MAX_SKILL_LEVEL = 30;
 
@@ -558,6 +577,7 @@
         let bushes = [];
         let bushTexture;
         const MEDICINAL_HERB_BUSH_INDEX = 4; // Fifth bush (index 4) is medicinal
+        const FLAX_BUSH_INDEX = 3; // Fourth bush (index 3) is Flax
         const HERB_REGROW_TIME = 300000; // 5 minutes in milliseconds
         
         // Bears
@@ -807,7 +827,7 @@
                 tex.magFilter = THREE.NearestFilter;
             });
             
-            const loadTextureWithTransparency = (url) => new Promise(resolve => {
+            const loadTextureWithTransparency = (url, fallbackColor = 0xFF00FF) => new Promise(resolve => {
                 const img = new Image();
                 img.crossOrigin = 'anonymous';
                 img.onload = () => {
@@ -842,6 +862,19 @@
                     texture.needsUpdate = true;
                     resolve(texture);
                 };
+                img.onerror = () => {
+                    console.warn(`Failed to load texture: ${url}. Using fallback.`);
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 32;
+                    canvas.height = 32;
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = '#' + fallbackColor.toString(16).padStart(6, '0');
+                    ctx.fillRect(0, 0, 32, 32);
+                    const texture = new THREE.CanvasTexture(canvas);
+                    texture.minFilter = THREE.NearestFilter;
+                    texture.magFilter = THREE.NearestFilter;
+                    resolve(texture);
+                };
                 img.src = url;
             });
             
@@ -865,6 +898,15 @@
                     texture.magFilter = THREE.NearestFilter;
                     texture.needsUpdate = true;
                     resolve(texture);
+                };
+                img.onerror = () => {
+                     console.warn(`Failed to load texture: ${url}. Using fallback.`);
+                     const canvas = document.createElement('canvas');
+                     canvas.width = 32; canvas.height = 32;
+                     const ctx = canvas.getContext('2d');
+                     ctx.fillStyle = '#00FF00'; // Green fallback
+                     ctx.fillRect(0,0,32,32);
+                     resolve(new THREE.CanvasTexture(canvas));
                 };
                 img.src = url;
             });
@@ -890,6 +932,24 @@
             const runAxeBackTexture = await loadTexture('https://res.cloudinary.com/julianbullmagic/image/upload/v1749555373/run_whit_axe_back_cdzyqg.png');
             const cuttingFrontTexture = await loadTexture('https://res.cloudinary.com/julianbullmagic/image/upload/v1749555186/cutting_tree_front_enon7m.png');
             const cuttingBackTexture = await loadTexture('https://res.cloudinary.com/julianbullmagic/image/upload/v1749555180/cutting_tree_back_huunqw.png');
+
+            // Load sword animations
+            const idleSwordFrontTexture = await loadTexture('https://res.cloudinary.com/dfksh5mnb/image/upload/v1703651865/idle_whit_sword_front_jo36oj.png');
+            const idleSwordBackTexture = await loadTexture('https://res.cloudinary.com/dfksh5mnb/image/upload/v1703651860/idle_whit_sword_back_btnp8f.png');
+            const runSwordFrontTexture = await loadTexture('https://res.cloudinary.com/dfksh5mnb/image/upload/v1703651907/run_whit_sword_front_xq86b4.png');
+            const runSwordBackTexture = await loadTexture('https://res.cloudinary.com/dfksh5mnb/image/upload/v1703651904/run_whit_sword_back_rhfdwu.png');
+            const attackSwordFrontTexture = await loadTexture('https://res.cloudinary.com/dfksh5mnb/image/upload/v1703651651/attack_01_front_ybvmrv.png');
+            const attackSwordBackTexture = await loadTexture('https://res.cloudinary.com/dfksh5mnb/image/upload/v1703651707/attack_01_back_yetngq.png');
+            
+            // Load campfire texture
+            campfireTexture = await loadTextureWithTransparency('https://res.cloudinary.com/dfksh5mnb/image/upload/v1705104302/CampFireFinished_xozgsa.png');
+
+            // Load animal textures
+            catTexture = await loadTextureWithTransparency('https://res.cloudinary.com/dfksh5mnb/image/upload/v1765429473/cat_uq5dty.jpg', 0xFFA500);
+            chickenTexture = await loadTextureWithTransparency('https://res.cloudinary.com/dfksh5mnb/image/upload/v1765284202/chicken_ykypbk.jpg', 0xFFFFFF);
+            // Assuming these are the generated images for Cow and Dragon based on previous context
+            cowTexture = await loadTextureWithTransparency('https://res.cloudinary.com/dfksh5mnb/image/upload/v1765285447/Gemini_Generated_Image_53p13f53p13f53p1_qxrpg9.png', 0x8B4513); 
+            dragonTexture = await loadTextureWithTransparency('https://res.cloudinary.com/dfksh5mnb/image/upload/v1765284531/Gemini_Generated_Image_a5drtha5drtha5dr_dqoc2p.png', 0xFF0000);
 
             // Load fishing animations
             const idleFishingFrontTexture = await loadTexture('https://res.cloudinary.com/dfksh5mnb/image/upload/v1703651832/idle_fishing_front_aupnm2.png');
@@ -922,6 +982,19 @@
             playerAnimationsWithAxe.cuttingFront = new SpriteAnimator(cuttingFrontTexture, 8, 1, 0.05, false);
             playerAnimationsWithAxe.cuttingBack = new SpriteAnimator(cuttingBackTexture, 8, 1, 0.05, false);
             
+            // Create sword animations
+            playerAnimationsWithSword.idleFront = new SpriteAnimator(idleSwordFrontTexture, 8, 1, 0.1);
+            playerAnimationsWithSword.idleBack = new SpriteAnimator(idleSwordBackTexture, 8, 1, 0.1);
+            playerAnimationsWithSword.runFront = new SpriteAnimator(runSwordFrontTexture, 8, 1, 0.1);
+            playerAnimationsWithSword.runBack = new SpriteAnimator(runSwordBackTexture, 8, 1, 0.1);
+            playerAnimationsWithSword.attackFront = new SpriteAnimator(attackSwordFrontTexture, 6, 1, 0.08, false); // 6 frames? Checking spritesheet size... usually 6-8
+            playerAnimationsWithSword.attackBack = new SpriteAnimator(attackSwordBackTexture, 6, 1, 0.08, false);
+
+            // Create campfire animation
+            // Campfire spritesheet usually has multiple frames. The provided image looks like a spritesheet.
+            // Assuming 1x5 or similar.
+            campfireAnimation = new SpriteAnimator(campfireTexture, 5, 1, 0.15); // Adjust frames if needed
+
             // Create fishing animations
             playerAnimationsWithFishingRod.idleFront = new SpriteAnimator(idleWithFishingRodFrontTexture, 8, 1, 0.1);
             playerAnimationsWithFishingRod.idleBack = new SpriteAnimator(idleWithFishingRodFrontTexture, 8, 1, 0.1); // Use front for back
@@ -1313,8 +1386,7 @@
             }
         }
 
-        function getSkillBasedDuration(skillName) {
-            const baseTime = 30000; // 30 seconds
+        function getSkillBasedDuration(skillName, baseTime = 30000) {
             const timeReductionPerLevel = 1000; // 1 second
             const level = skills[skillName] || 0;
             const duration = baseTime - (level * timeReductionPerLevel);
@@ -1334,13 +1406,13 @@
             updateSkillsUI();
         }
 
-        function startLongAction(skillName, onComplete, target = null) {
+        function startLongAction(skillName, onComplete, target = null, baseDuration = 30000) {
             if (isPerformingLongAction) return;
 
             isPerformingLongAction = true;
             longActionType = skillName;
             longActionStartTime = Date.now();
-            longActionDuration = getSkillBasedDuration(skillName);
+            longActionDuration = getSkillBasedDuration(skillName, baseDuration);
             longActionOnComplete = onComplete;
 
             if (skillName === 'mining' && target) {
@@ -1352,8 +1424,117 @@
                 }
             }
             
-            // TODO: Add a progress bar UI
-            showNotification(`Starting to ${skillName}...`);
+            showNotification(`Starting to ${skillName}... (${(longActionDuration/1000).toFixed(1)}s)`);
+        }
+        
+        function createCampfire() {
+            if ((inventory['Wood'] || 0) <= 0) {
+                showNotification("Need wood to make fire");
+                return;
+            }
+            
+            // Place at feet
+            const x = Math.floor(playerPos.x);
+            const z = Math.floor(playerPos.z);
+            let y = Math.floor(playerPos.y - 1.0);
+            
+            // Check if spot is valid (solid ground, no existing campfire)
+            const groundBlock = getTerrainBlock(x, z, y);
+            if (groundBlock === undefined) {
+                 // Try one below
+                 y--;
+                 if (getTerrainBlock(x, z, y) === undefined) {
+                     showNotification("Cannot place fire in air");
+                     return;
+                 }
+            }
+            
+            // Check for existing campfire
+            if (campfires.some(c => Math.floor(c.x) === x && Math.floor(c.z) === z && Math.floor(c.y) === y)) {
+                showNotification("There is already a fire here");
+                return;
+            }
+
+            inventory['Wood']--;
+            updateInventoryUI();
+            
+            // Create visual
+            const fireGeo = new THREE.PlaneGeometry(1, 1);
+            const fireTex = campfireTexture.clone();
+            fireTex.needsUpdate = true;
+            
+            // Setup spritesheet (assuming 1x5 based on common campfire assets, but if it's a single image, we might need adjustment. 
+            // The prompt says "CampFireFinished_xozgsa.png". Let's assume it's a spritesheet as instantiated in init with SpriteAnimator.
+            // If it's a static image, SpriteAnimator will just loop 1 frame if configured so.
+            // In init we did: campfireAnimation = new SpriteAnimator(campfireTexture, 5, 1, 0.15);
+            // We need to clone this animator for each instance OR share it?
+            // Actually, SpriteAnimator modifies texture offset. So we need independent textures/animators per instance
+            // OR we render all fires with the same animation phase (sync). Sync is cheaper.
+            
+            fireTex.wrapS = THREE.RepeatWrapping;
+            fireTex.wrapT = THREE.RepeatWrapping;
+            fireTex.repeat.set(1/5, 1); // 5 frames horizontal
+            
+            const fireMat = new THREE.MeshBasicMaterial({
+                map: fireTex,
+                transparent: true,
+                side: THREE.FrontSide,
+                depthWrite: false
+            });
+            
+            const fireMesh = new THREE.Mesh(fireGeo, fireMat);
+            fireMesh.position.set(x + 0.5, y + 1.5, z + 0.5);
+            
+            // Group for wrapping
+            const fireGroup = new THREE.Group();
+            for (let offsetX = -1; offsetX <= 1; offsetX++) {
+                for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
+                    const copy = fireMesh.clone();
+                    copy.material = fireMat.clone(); // Clone material to allow independent offset if we wanted, but we can sync them.
+                    // Actually for sync, we can share material if we update the shared texture offset? 
+                    // No, ThreeJS texture offset is per texture instance.
+                    // Let's create a new material but use the same texture logic.
+                    
+                    copy.position.set(x + 0.5 + offsetX * worldSize, y + 1.5, z + 0.5 + offsetZ * worldSize);
+                    fireGroup.add(copy);
+                }
+            }
+            scene.add(fireGroup);
+            
+            campfires.push({
+                x: x + 0.5, y, z: z + 0.5,
+                group: fireGroup,
+                creationTime: Date.now(),
+                animator: new SpriteAnimator(fireTex, 5, 1, 0.15) // Each fire needs its own animator to control its texture
+            });
+            
+            // We need to apply the animator to ALL copies in the group.
+            // The animator in the object controls 'fireTex'. 
+            // But we cloned materials for copies.
+            // Let's simplify: 1 animator per fire instance. The animator updates 'fireTex'.
+            // The copies need to share 'fireTex' or we need to update all their textures.
+            // In the loop above: `copy.material = fireMat.clone();` -> uses `fireTex` (cloned).
+            // Wait, `fireTex = campfireTexture.clone()`.
+            // So `fireMat` uses `fireTex`.
+            // `copy.material` uses `fireTex`. 
+            // So updating `fireTex` updates all copies. Great.
+            
+            showNotification("Campfire created!");
+        }
+
+        function updateCampfires(deltaTime) {
+            campfires.forEach(fire => {
+                fire.animator.update(deltaTime);
+                
+                // Billboard
+                fire.group.children.forEach(mesh => {
+                     const angle = Math.atan2(
+                        camera.position.x - mesh.position.x,
+                        camera.position.z - mesh.position.z
+                    );
+                    mesh.rotation.y = angle;
+                });
+            });
         }
 
         function updateLongAction() {
@@ -2518,6 +2699,8 @@
                             destroyBlockInDirection();
                         } else if (equippedTool && equippedTool.id === TOOLS.AXE.id) {
                             cutTreeInDirection();
+                        } else if (equippedTool && equippedTool.id === TOOLS.SWORD.id) {
+                            attackInDirection();
                         }
                     } else {
                         isUsingTool = false;
@@ -2531,6 +2714,8 @@
                             animationSet = playerAnimationsWithAxe;
                         } else if (equippedTool && equippedTool.id === TOOLS.FISHING_ROD.id) {
                             animationSet = playerAnimationsWithFishingRod;
+                        } else if (equippedTool && equippedTool.id === TOOLS.SWORD.id) {
+                            animationSet = playerAnimationsWithSword;
                         } else {
                             animationSet = playerAnimations;
                         }
@@ -2617,6 +2802,8 @@
                 animationSet = playerAnimationsWithAxe;
             } else if (equippedTool && equippedTool.id === TOOLS.FISHING_ROD.id) {
                 animationSet = playerAnimationsWithFishingRod;
+            } else if (equippedTool && equippedTool.id === TOOLS.SWORD.id) {
+                animationSet = playerAnimationsWithSword;
             } else {
                 animationSet = playerAnimations;
             }
@@ -2643,29 +2830,18 @@
             }
             
             // Adjust geometry size for specific fishing animations to make them twice as big
-            // These animations should be twice as big:
-            // - castingFront (throwing_fishing_rod_front)
-            // - waitingFront (idle_fishing_front)
-            // - fishBiteFront (fish_bit_the_line_front)
-            // - catchingFront (catching_the_fish_front)
             if (playerSprite && (currentAnimation === playerAnimationsWithFishingRod.castingFront ||
                                 currentAnimation === playerAnimationsWithFishingRod.waitingFront ||
                                 currentAnimation === playerAnimationsWithFishingRod.fishBiteFront ||
                                 currentAnimation === playerAnimationsWithFishingRod.catchingFront)) {
-                // These specific fishing animations should be twice as big
                 if (!playerSprite.userData.isFishingScaled) {
                     playerSprite.userData.isFishingScaled = true;
-                    
-                    // Store original geometry if not already stored
                     if (!playerSprite.userData.originalGeometry) {
                         playerSprite.userData.originalGeometry = playerSprite.geometry;
                     }
-                    
-                    // Create a larger geometry (2x the original size)
-                    playerSprite.geometry = new THREE.PlaneGeometry(3.6, 3.18);  // 2x the normal size
+                    playerSprite.geometry = new THREE.PlaneGeometry(3.6, 3.18);
                 }
             } else if (playerSprite && playerSprite.userData.isFishingScaled) {
-                // Restore original geometry for non-fishing animations
                 playerSprite.userData.isFishingScaled = false;
                 if (playerSprite.userData.originalGeometry) {
                     playerSprite.geometry = playerSprite.userData.originalGeometry;
@@ -2707,42 +2883,252 @@
             return terrain[wrappedX]?.[wrappedZ]?.[y];
         }
 
+        // Physics
+        let playerVelocityY = 0;
+        const GRAVITY = 0.03;
+        const JUMP_FORCE = 0.3;
+
+        function jump() {
+            // Check if on ground (or close enough)
+            const x = Math.floor(playerPos.x);
+            const z = Math.floor(playerPos.z);
+            // Check deeper to find the block we are standing ON
+            const feetY = Math.floor(playerPos.y - 1.5);
+            
+            // We can jump if standing on a block OR if we are at world bottom (2.0)
+            const blockBeneath = getTerrainBlock(x, z, feetY);
+            
+            // Allow jump if velocity is near zero (standing)
+            // AND (block beneath exists OR at ground level)
+            // Relaxed velocity check slightly
+            if (Math.abs(playerVelocityY) < 0.1 && (blockBeneath !== undefined || playerPos.y <= 2.1)) {
+                playerVelocityY = JUMP_FORCE;
+                // showNotification("Jump!");
+            }
+        }
+
+        // New Animals
+        let cats = [], chickens = [], cows = [], dragons = [];
+        let catTexture, chickenTexture, cowTexture, dragonTexture;
+
+        // ...
+
+        function generateCats() {
+            const num = 20; // Increased from 5
+            console.log("Generating Cats...");
+            let spawned = 0;
+            for (let i = 0; i < num; i++) {
+                const pos = findRandomSpawnPosition();
+                if (!pos) continue;
+                
+                const geo = new THREE.PlaneGeometry(0.5, 0.5); // Small
+                const mat = new THREE.MeshBasicMaterial({ map: catTexture, transparent: true, side: THREE.FrontSide, depthWrite: false });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.copy(pos);
+                
+                const group = createWrappedGroup(mesh, pos);
+                scene.add(group);
+                
+                cats.push({ group, position: pos, type: 'cat', speed: 0.1, followDistance: 10, stopDistance: 1.5 });
+                spawned++;
+            }
+            console.log(`Spawned ${spawned} cats`);
+        }
+
+        function generateChickens() {
+            const num = 30; // Increased from 10
+            console.log("Generating Chickens...");
+            let spawned = 0;
+            for (let i = 0; i < num; i++) {
+                const pos = findRandomSpawnPosition();
+                if (!pos) continue;
+                
+                const geo = new THREE.PlaneGeometry(0.4, 0.4); // Very small
+                const mat = new THREE.MeshBasicMaterial({ map: chickenTexture, transparent: true, side: THREE.FrontSide, depthWrite: false });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.copy(pos);
+                
+                const group = createWrappedGroup(mesh, pos);
+                scene.add(group);
+                
+                chickens.push({ group, position: pos, type: 'chicken', speed: 0.08, followDistance: 8, stopDistance: 1.0 });
+                spawned++;
+            }
+            console.log(`Spawned ${spawned} chickens`);
+        }
+
+        function generateCows() {
+            const num = 15; // Increased from 5
+            console.log("Generating Cows...");
+            let spawned = 0;
+            for (let i = 0; i < num; i++) {
+                const pos = findRandomSpawnPosition();
+                if (!pos) continue;
+                
+                const geo = new THREE.PlaneGeometry(1.2, 1.0); // Normal/Large
+                const mat = new THREE.MeshBasicMaterial({ map: cowTexture, transparent: true, side: THREE.FrontSide, depthWrite: false });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.copy(pos);
+                
+                const group = createWrappedGroup(mesh, pos);
+                scene.add(group);
+                
+                cows.push({ group, position: pos, type: 'cow', speed: 0.06, followDistance: 12, stopDistance: 2.0 });
+                spawned++;
+            }
+            console.log(`Spawned ${spawned} cows`);
+        }
+
+        function generateDragons() {
+            const num = 5; // Increased from 2
+            console.log("Generating Dragons...");
+            let spawned = 0;
+            for (let i = 0; i < num; i++) {
+                const pos = findRandomSpawnPosition();
+                if (!pos) continue;
+                
+                const geo = new THREE.PlaneGeometry(3.0, 3.0); // 3x bigger
+                const mat = new THREE.MeshBasicMaterial({ map: dragonTexture, transparent: true, side: THREE.FrontSide, depthWrite: false });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.copy(pos);
+                
+                const group = createWrappedGroup(mesh, pos);
+                scene.add(group);
+                
+                dragons.push({ group, position: pos, type: 'dragon', speed: 0.04, wander: true });
+                spawned++;
+            }
+            console.log(`Spawned ${spawned} dragons`);
+        }
+
+        function findRandomSpawnPosition() {
+            for(let i=0; i<50; i++) {
+                const x = Math.floor(Math.random() * worldSize);
+                const z = Math.floor(Math.random() * worldSize);
+                // find ground
+                if (!terrain[x] || !terrain[x][z]) continue;
+                for (let y = worldSize - 1; y >= 0; y--) {
+                    if (terrain[x][z][y] !== undefined && terrain[x][z][y] === MATERIALS.SOIL.id) {
+                        return new THREE.Vector3(x + 0.5, y + 1.5, z + 0.5);
+                    }
+                }
+            }
+            return null;
+        }
+
+        function createWrappedGroup(mesh, pos) {
+            const group = new THREE.Group();
+            for (let offsetX = -1; offsetX <= 1; offsetX++) {
+                for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
+                    const copy = mesh.clone();
+                    copy.position.set(pos.x + offsetX * worldSize, pos.y, pos.z + offsetZ * worldSize);
+                    group.add(copy);
+                }
+            }
+            return group;
+        }
+
+        function updateFollowAnimals(animals, deltaTime) {
+            if (animals.length > 0 && Math.random() < 0.01) {
+                 console.log(`Updating ${animals.length} animals of type ${animals[0].type}. First pos: ${JSON.stringify(animals[0].position)}`);
+            }
+            animals.forEach(animal => {
+                const dist = getWrappedDistance(animal.position.x, animal.position.z, playerPos.x, playerPos.z);
+                
+                let moveDir = new THREE.Vector3(0,0,0);
+                
+                if (animal.wander) {
+                    // Random wander logic (simplified)
+                    if (Math.random() < 0.02) {
+                        animal.wanderDir = new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5).normalize();
+                    }
+                    if (animal.wanderDir) moveDir = animal.wanderDir;
+                } else if (dist < animal.followDistance && dist > animal.stopDistance) {
+                    // Follow player
+                    moveDir = getWrappedDirection(animal.position.x, animal.position.z, playerPos.x, playerPos.z);
+                } else if (Math.random() < 0.01) {
+                     // Occasional idle wander
+                     animal.wanderDir = new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5).normalize();
+                     moveDir = animal.wanderDir;
+                }
+
+                if (moveDir.lengthSq() > 0) {
+                    animal.position.x += moveDir.x * animal.speed;
+                    animal.position.z += moveDir.z * animal.speed;
+                    
+                    // Wrap
+                    if (animal.position.x < 0) animal.position.x += worldSize;
+                    if (animal.position.x >= worldSize) animal.position.x -= worldSize;
+                    if (animal.position.z < 0) animal.position.z += worldSize;
+                    if (animal.position.z >= worldSize) animal.position.z -= worldSize;
+                    
+                    // Height adjustment
+                    const gx = Math.floor(animal.position.x);
+                    const gz = Math.floor(animal.position.z);
+                    let gy = 0;
+                    // find top block
+                    if (terrain[gx] && terrain[gx][gz]) {
+                         for(let y=worldSize-1; y>=0; y--) {
+                             if (terrain[gx][gz][y] !== undefined) {
+                                 gy = y + 1;
+                                 break;
+                             }
+                         }
+                    }
+                    animal.position.y = gy + (animal.type === 'dragon' ? 1.5 : 0.5); // Offset based on size
+                }
+
+                // Update group copies
+                let idx = 0;
+                animal.group.children.forEach(mesh => {
+                    const ox = (idx % 3 - 1) * worldSize;
+                    const oz = (Math.floor(idx / 3) - 1) * worldSize;
+                    mesh.position.set(animal.position.x + ox, animal.position.y, animal.position.z + oz);
+                    
+                    // Billboard
+                    const angle = Math.atan2(camera.position.x - mesh.position.x, camera.position.z - mesh.position.z);
+                    mesh.rotation.y = angle;
+                    
+                    // Flip based on movement? (Simplified: just billboard)
+                    idx++;
+                });
+            });
+        }
+
+
         function updatePlayerPosition() {
             const x = Math.floor(playerPos.x);
             const z = Math.floor(playerPos.z);
-            const feetY = Math.floor(playerPos.y - 1.0);
-
-            // Check if there's a block directly beneath the player's feet (with wrapping)
-            let isOnGround = false;
-            const blockBeneath = getTerrainBlock(x, z, feetY);
             
-            if (blockBeneath !== undefined) {
-                // Standing on a block
-                isOnGround = true;
-                // Snap to standing position on this block
-                const targetY = feetY + 1 + 1.0; // block top + player height offset
-                if (Math.abs(playerPos.y - targetY) < 0.01) {
-                    playerPos.y = targetY;
-                } else if (playerPos.y < targetY) {
-                    playerPos.y = Math.min(playerPos.y + 0.15, targetY);
+            // Apply gravity
+            playerVelocityY -= GRAVITY;
+            // Terminal velocity
+            playerVelocityY = Math.max(playerVelocityY, -0.5);
+            
+            playerPos.y += playerVelocityY;
+            
+            const feetY = Math.floor(playerPos.y - 1.0);
+            
+            // Check for ground collision
+            if (playerVelocityY <= 0) {
+                const blockBeneath = getTerrainBlock(x, z, feetY);
+                if (blockBeneath !== undefined) {
+                    // Landed on block
+                    const groundTop = feetY + 1; // Top of the block
+                    // Snap if we are close to the top (prevents falling through if moving fast)
+                    // and we were above it before?
+                    // Simple check: if feet are inside the block, snap up
+                    if (playerPos.y - 1.0 < groundTop) {
+                        playerPos.y = groundTop + 1.0;
+                        playerVelocityY = 0;
+                    }
                 }
             }
             
-            // Apply gravity if not on ground
-            if (!isOnGround) {
-                playerPos.y -= 0.2; // Falling speed
-                
-                // Check for ground below during fall
-                for (let checkY = Math.floor(playerPos.y - 1.0); checkY >= 0; checkY--) {
-                    if (getTerrainBlock(x, z, checkY) !== undefined) {
-                        // Hit ground
-                        playerPos.y = checkY + 1 + 1.0;
-                        break;
-                    }
-                }
-                
-                // Don't fall below 0
-                playerPos.y = Math.max(2.0, playerPos.y);
+            // Don't fall below world bottom
+            if (playerPos.y < 2.0) {
+                playerPos.y = 2.0;
+                playerVelocityY = 0;
             }
             
             player.position.copy(playerPos);
@@ -3015,6 +3401,103 @@
             return blockGroup;
         }
 
+        let ownedTools = new Set([TOOLS.PICKAXE.id]);
+
+        function isNearCampfire() {
+             const x = Math.floor(playerPos.x);
+             const y = Math.floor(playerPos.y);
+             const z = Math.floor(playerPos.z);
+             
+             // Check radius 2
+             return campfires.some(f => {
+                 return Math.abs(f.x - x) < 3 && Math.abs(f.z - z) < 3 && Math.abs(f.y - (y-1)) < 3;
+             });
+        }
+
+        function checkCrafting() {
+             // Check if Metal is selected
+             const metalId = MATERIALS.METAL.id;
+             if (!selectedMaterials.has(metalId)) return false;
+             
+             if (!isNearCampfire()) {
+                 return false;
+             }
+             
+             showCraftingMenu();
+             return true;
+        }
+
+        function showCraftingMenu() {
+            // Create a simple HTML overlay
+            let menu = document.getElementById('craftingMenu');
+            if (!menu) {
+                menu = document.createElement('div');
+                menu.id = 'craftingMenu';
+                menu.style.cssText = `
+                    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+                    background: rgba(0,0,0,0.9); padding: 20px; border: 2px solid #FF9800;
+                    color: white; z-index: 100; text-align: center; border-radius: 10px;
+                    min-width: 250px;
+                `;
+                document.body.appendChild(menu);
+            }
+            
+            menu.innerHTML = '<h3>Manufacturing</h3>';
+            
+            const tools = [
+                { name: 'Axe', cost: 1, id: TOOLS.AXE.id },
+                { name: 'Pickaxe', cost: 1, id: TOOLS.PICKAXE.id },
+                { name: 'Sword', cost: 2, id: TOOLS.SWORD.id }
+            ];
+            
+            tools.forEach(tool => {
+                if (ownedTools.has(tool.id)) return; // Already owned
+                
+                const btn = document.createElement('button');
+                btn.textContent = `Craft ${tool.name} (${tool.cost} Metal)`;
+                btn.className = 'action-button';
+                btn.style.display = 'block';
+                btn.style.margin = '10px auto';
+                btn.style.width = '100%';
+                
+                btn.onclick = () => {
+                    craftTool(tool);
+                    menu.style.display = 'none';
+                };
+                
+                menu.appendChild(btn);
+            });
+            
+            if (menu.children.length === 1) { // Only header
+                 menu.innerHTML += '<p>You own all tools!</p>';
+            }
+            
+            const closeBtn = document.createElement('button');
+            closeBtn.textContent = "Cancel";
+            closeBtn.className = 'action-button';
+            closeBtn.style.backgroundColor = '#666';
+            closeBtn.onclick = () => menu.style.display = 'none';
+            menu.appendChild(closeBtn);
+            
+            menu.style.display = 'block';
+        }
+        
+        function craftTool(tool) {
+            if ((inventory['Metal'] || 0) < tool.cost) {
+                showNotification("Not enough metal!");
+                return;
+            }
+            
+            const onComplete = () => {
+                 inventory['Metal'] -= tool.cost;
+                 ownedTools.add(tool.id);
+                 updateInventoryUI();
+                 showNotification(`Crafted ${tool.name}!`);
+            };
+            
+            startLongAction('manufacturing', onComplete, null, 30000);
+        }
+
         function updateInventoryUI() {
             const inventoryDiv = document.getElementById('materialInventory');
             inventoryDiv.innerHTML = '';
@@ -3028,16 +3511,19 @@
                 p.textContent = `${materialType.name}: ${count}`;
                 p.dataset.materialId = materialType.id;
 
-                if (selectedMaterial && selectedMaterial.id === materialType.id) {
+                if (selectedMaterials.has(materialType.id)) {
                     p.classList.add('selected');
                 }
 
                 p.addEventListener('click', () => {
-                    if (!equippedTool) {
-                        selectedMaterial = materialType;
-                        plantingSeeds = false;
-                        updateInventoryUI();
+                    if (selectedMaterials.has(materialType.id)) {
+                        selectedMaterials.delete(materialType.id);
+                    } else {
+                        selectedMaterials.add(materialType.id);
                     }
+                    plantingSeeds = false;
+                    plantingBushSeeds = false;
+                    updateInventoryUI();
                 });
 
                 inventoryDiv.appendChild(p);
@@ -3047,13 +3533,33 @@
             const resourceDiv = document.getElementById('resourceInventory');
             resourceDiv.innerHTML = '';
             
-            const hasResources = inventory['Wood'] || inventory['Seeds'] || inventory['Bush Seeds'] || inventory['Fruit'] || inventory['Medicinal Herb'] || inventory['Fish'];
+            const hasResources = inventory['Wood'] || inventory['Seeds'] || inventory['Bush Seeds'] || inventory['Fruit'] || inventory['Medicinal Herb'] || inventory['Fish'] || inventory['Flax'];
             
             if (hasResources) {
                 if (inventory['Wood']) {
                     const woodItem = document.createElement('p');
                     woodItem.textContent = `Wood: ${inventory['Wood']}`;
+                    
+                    // Add "Make Fire" button if we have wood
+                    const fireBtn = document.createElement('button');
+                    fireBtn.textContent = "Make Fire";
+                    fireBtn.className = "action-button";
+                    fireBtn.style.fontSize = "10px";
+                    fireBtn.style.padding = "2px 5px";
+                    fireBtn.style.marginLeft = "10px";
+                    fireBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        createCampfire();
+                    };
+                    woodItem.appendChild(fireBtn);
+                    
                     resourceDiv.appendChild(woodItem);
+                }
+
+                if (inventory['Flax']) {
+                    const flaxItem = document.createElement('p');
+                    flaxItem.textContent = `Flax: ${inventory['Flax']}`;
+                    resourceDiv.appendChild(flaxItem);
                 }
 
                 if (inventory['Seeds']) {
@@ -3072,10 +3578,9 @@
                     
                     seedsItem.addEventListener('click', () => {
                         if ((inventory['Seeds'] || 0) > 0) {
-                            plantingSeeds = true;
+                            plantingSeeds = !plantingSeeds;
                             plantingBushSeeds = false;
-                            selectedMaterial = null;
-                            equippedTool = null;
+                            selectedMaterials.clear();
                             updateInventoryUI();
                         }
                     });
@@ -3099,10 +3604,9 @@
                     
                     bushSeedsItem.addEventListener('click', () => {
                         if ((inventory['Bush Seeds'] || 0) > 0) {
-                            plantingBushSeeds = true;
+                            plantingBushSeeds = !plantingBushSeeds;
                             plantingSeeds = false;
-                            selectedMaterial = null;
-                            equippedTool = null;
+                            selectedMaterials.clear();
                             updateInventoryUI();
                         }
                     });
@@ -3189,73 +3693,43 @@
             const toolDiv = document.getElementById('toolInventory');
             toolDiv.innerHTML = '';
             
-            // Pickaxe item
-            const pickaxeItem = document.createElement('p');
-            pickaxeItem.textContent = 'Pickaxe';
-            pickaxeItem.dataset.toolId = TOOLS.PICKAXE.id;
-            
-            if (equippedTool && equippedTool.id === TOOLS.PICKAXE.id) {
-                pickaxeItem.classList.add('selected');
-            }
+            const createToolItem = (tool, name) => {
+                if (!ownedTools.has(tool.id)) return null;
 
-            pickaxeItem.addEventListener('click', () => {
-                if (equippedTool && equippedTool.id === TOOLS.PICKAXE.id) {
-                    equippedTool = null;
-                } else {
-                    equippedTool = TOOLS.PICKAXE;
-                    selectedMaterial = null;
-                    plantingSeeds = false;
+                const item = document.createElement('p');
+                item.textContent = name;
+                item.dataset.toolId = tool.id;
+                
+                if (equippedTool && equippedTool.id === tool.id) {
+                    item.classList.add('selected');
                 }
-                updateInventoryUI();
-            });
 
-            toolDiv.appendChild(pickaxeItem);
+                item.addEventListener('click', () => {
+                    if (equippedTool && equippedTool.id === tool.id) {
+                        equippedTool = null;
+                        if (tool.id === TOOLS.FISHING_ROD.id) stopFishing();
+                    } else {
+                        equippedTool = tool;
+                        // Do not clear selected materials
+                        plantingSeeds = false;
+                    }
+                    updateInventoryUI();
+                });
+                return item;
+            };
 
-            // Axe item
-            const axeItem = document.createElement('p');
-            axeItem.textContent = 'Axe';
-            axeItem.dataset.toolId = TOOLS.AXE.id;
+            const pickaxe = createToolItem(TOOLS.PICKAXE, 'Pickaxe');
+            if(pickaxe) toolDiv.appendChild(pickaxe);
             
-            if (equippedTool && equippedTool.id === TOOLS.AXE.id) {
-                axeItem.classList.add('selected');
-            }
-
-            axeItem.addEventListener('click', () => {
-                if (equippedTool && equippedTool.id === TOOLS.AXE.id) {
-                    equippedTool = null;
-                } else {
-                    equippedTool = TOOLS.AXE;
-                    selectedMaterial = null;
-                    plantingSeeds = false;
-                }
-                updateInventoryUI();
-            });
-
-            toolDiv.appendChild(axeItem);
-
-            // Fishing rod item
-            const fishingRodItem = document.createElement('p');
-            fishingRodItem.textContent = 'Fishing Rod';
-            fishingRodItem.dataset.toolId = TOOLS.FISHING_ROD.id;
+            const axe = createToolItem(TOOLS.AXE, 'Axe');
+            if(axe) toolDiv.appendChild(axe);
             
-            if (equippedTool && equippedTool.id === TOOLS.FISHING_ROD.id) {
-                fishingRodItem.classList.add('selected');
-            }
-
-            fishingRodItem.addEventListener('click', () => {
-                if (equippedTool && equippedTool.id === TOOLS.FISHING_ROD.id) {
-                    equippedTool = null;
-                    stopFishing();
-                } else {
-                    equippedTool = TOOLS.FISHING_ROD.id === 2 ? TOOLS.FISHING_ROD : { id: 2, name: 'Fishing Rod' };
-                    selectedMaterial = null;
-                    plantingSeeds = false;
-                }
-                updateInventoryUI();
-            });
-
-            toolDiv.appendChild(fishingRodItem);
+            const rod = createToolItem(TOOLS.FISHING_ROD, 'Fishing Rod');
+            if(rod) toolDiv.appendChild(rod);
             
+            const sword = createToolItem(TOOLS.SWORD, 'Sword');
+            if(sword) toolDiv.appendChild(sword);
+
             // Plant button state
             const plantButton = document.getElementById('plantButton');
             const hasSeeds = (inventory['Seeds'] || 0) > 0;
@@ -3490,8 +3964,8 @@
         }
 
         function cutTreeInDirection() {
-            if (!equippedTool || equippedTool.id !== TOOLS.AXE.id) {
-                showNotification("Equip axe first!");
+            if (!equippedTool || (equippedTool.id !== TOOLS.AXE.id && equippedTool.id !== TOOLS.PICKAXE.id)) {
+                showNotification("Equip axe or pickaxe first!");
                 return;
             }
             if (isPerformingLongAction) {
@@ -3523,13 +3997,20 @@
 
             if (bushIndex !== -1) {
                 const bush = bushes[bushIndex];
+                
+                // If flax
+                if (bush.type === FLAX_BUSH_INDEX) {
+                    inventory['Flax'] = (inventory['Flax'] || 0) + (1 + Math.floor(Math.random() * 2));
+                    showNotification("Harvested Flax!");
+                } else {
+                    // Add bush seeds to inventory
+                    inventory['Bush Seeds'] = (inventory['Bush Seeds'] || 0) + (1 + Math.floor(Math.random() * 2)); // 1-2 seeds
+                    showNotification("Cut down bush! Got seeds");
+                }
+                
                 scene.remove(bush.group);
                 bushes.splice(bushIndex, 1);
-                
-                // Add bush seeds to inventory
-                inventory['Bush Seeds'] = (inventory['Bush Seeds'] || 0) + (1 + Math.floor(Math.random() * 2)); // 1-2 seeds
                 updateInventoryUI();
-                showNotification("Cut down bush! Got seeds");
                 return;
             }
 
@@ -3562,11 +4043,17 @@
                     // Set rotation axis
                     tree.rotationAxis = new THREE.Vector3(0, 0, 1);
                     
-                    showNotification(`Cutting ${treeType.name} tree`);
+                    showNotification(`Cut down ${treeType.name} tree`);
                     updateInventoryUI();
                 };
 
-                startLongAction('lumberjacking', onComplete);
+                // Calculate duration based on tool
+                let baseDuration = 30000; // Axe default
+                if (equippedTool.id === TOOLS.PICKAXE.id) {
+                    baseDuration = 60000; // Pickaxe is 2x slower
+                }
+
+                startLongAction('lumberjacking', onComplete, null, baseDuration);
 
             } else {
                 showNotification("No tree to cut");
@@ -3932,10 +4419,13 @@ showNotification(`Planted a ${TREE_TYPES[treeType].name} sapling`);
                 return;
             }
             
-            if (!selectedMaterial) {
-                showNotification("Select a material first");
+            if (selectedMaterials.size !== 1) {
+                showNotification("Select exactly one material to build");
                 return;
             }
+            
+            const selectedMaterialId = selectedMaterials.values().next().value;
+            const selectedMaterial = Object.values(MATERIALS).find(m => m.id === selectedMaterialId);
             
             if ((inventory[selectedMaterial.name] || 0) <= 0) {
                 showNotification(`No ${selectedMaterial.name} in inventory`);
@@ -3984,46 +4474,69 @@ showNotification(`Planted a ${TREE_TYPES[treeType].name} sapling`);
                 );
             }
 
-            let placed = false;
+            // Find valid spot
+            let targetSpot = null;
             for (const candidate of placementCandidates) {
                 let { x, y, z } = candidate;
 
-                // Wrap coordinates
                 const wrappedX = ((x % worldSize) + worldSize) % worldSize;
                 const wrappedZ = ((z % worldSize) + worldSize) % worldSize;
 
-                // Check bounds for Y only
-                if (y < 0 || y >= worldSize) {
-                    continue;
+                if (y < 0 || y >= worldSize) continue;
+
+                if (blockMeshes[wrappedX]?.[z]?.[y]) {
+                    continue; // Occupied
                 }
 
-                // Check if space is empty
-                if (terrain[wrappedX]?.[wrappedZ]?.[y] !== undefined) {
-                    continue;
+                // Check support
+                let hasSupport = false;
+                // Support below
+                if (y > 0 && terrain[wrappedX]?.[wrappedZ]?.[y - 1] !== undefined) hasSupport = true;
+                // Support adjacent
+                const adj = [
+                    { dx: 1, dz: 0 }, { dx: -1, dz: 0 }, { dx: 0, dz: 1 }, { dx: 0, dz: -1 }
+                ];
+                for (const d of adj) {
+                    const nx = (wrappedX + d.dx + worldSize) % worldSize;
+                    const nz = (wrappedZ + d.dz + worldSize) % worldSize;
+                    if (terrain[nx]?.[nz]?.[y] !== undefined) hasSupport = true;
                 }
+                
+                if (!hasSupport && y > 0) continue; // Need support unless at bottom? well usually need support
 
-                // Don't place blocks inside the player
+                // Don't place inside player
                 const wrappedPlayerX = ((playerX % worldSize) + worldSize) % worldSize;
                 const wrappedPlayerZ = ((playerZ % worldSize) + worldSize) % worldSize;
                 if (wrappedX === wrappedPlayerX && wrappedZ === wrappedPlayerZ && 
                     y >= playerFeetY && y <= playerFeetY + 1) {
                     continue;
                 }
-
-                const newBlockMesh = createBlock(wrappedX, y, wrappedZ, selectedMaterial);
-                blockMeshes[wrappedX][wrappedZ][y] = newBlockMesh;
-                terrain[wrappedX][wrappedZ][y] = selectedMaterial.id;
-
-                inventory[selectedMaterial.name]--;
-                updateInventoryUI();
-                updateSurroundingBlockVisibility(wrappedX, y, wrappedZ);
-                showNotification(`Placed ${selectedMaterial.name} block`);
-                saveGameState();
-                placed = true;
+                
+                targetSpot = { x: wrappedX, y, z: wrappedZ };
                 break;
             }
 
-            if (!placed) {
+            if (targetSpot) {
+                const onComplete = () => {
+                    const { x, y, z } = targetSpot;
+                    // Check inventory again
+                    if ((inventory[selectedMaterial.name] || 0) <= 0) return;
+                    // Check vacancy again
+                    if (blockMeshes[x]?.[z]?.[y]) return;
+
+                    const newBlockMesh = createBlock(x, y, z, selectedMaterial);
+                    blockMeshes[x][z][y] = newBlockMesh;
+                    terrain[x][z][y] = selectedMaterial.id;
+
+                    inventory[selectedMaterial.name]--;
+                    updateInventoryUI();
+                    updateSurroundingBlockVisibility(x, y, z);
+                    showNotification(`Placed ${selectedMaterial.name} block`);
+                    saveGameState();
+                };
+                
+                startLongAction('construction', onComplete, null, 20000);
+            } else {
                 showNotification("No space for placement nearby");
             }
         }
@@ -4145,6 +4658,10 @@ function rotateCamera(dir) {
                     currentAnimation = playerFacing === 'front' ? 
                         playerAnimationsWithAxe.cuttingFront : 
                         playerAnimationsWithAxe.cuttingBack;
+                } else if (equippedTool && equippedTool.id === TOOLS.SWORD.id) {
+                    currentAnimation = playerFacing === 'front' ? 
+                        playerAnimationsWithSword.attackFront : 
+                        playerAnimationsWithSword.attackBack;
                 }
                 
                 if (currentAnimation) {
@@ -4282,12 +4799,14 @@ function rotateCamera(dir) {
             bushes.forEach(b => scene.remove(b.group));
             bears.forEach(b => scene.remove(b.group));
             wolves.forEach(w => scene.remove(w.group));
+            campfires.forEach(c => scene.remove(c.group));
 
             // Reset state arrays
             trees = [];
             bushes = [];
             bears = [];
             wolves = [];
+            campfires = [];
             blockMeshes = [];
             terrain = [];
 
@@ -4301,6 +4820,13 @@ function rotateCamera(dir) {
             lastRainCycle = gameState.lastRainCycle;
             isRaining = gameState.isRaining;
             rainStartTime = gameState.rainStartTime;
+            
+            // Restore owned tools
+            if (gameState.ownedTools) {
+                ownedTools = new Set(gameState.ownedTools);
+            } else {
+                ownedTools = new Set([TOOLS.PICKAXE.id]);
+            }
 
             // 3. Rebuild the world
             terrain = gameState.terrain;
@@ -4327,9 +4853,12 @@ function rotateCamera(dir) {
                 }
             }
 
-            // Re-create trees, bushes, animals
+            // Re-create trees, bushes, animals, campfires
             gameState.trees.forEach(t => createTreeFromSave(t));
             gameState.bushes.forEach(b => createBushFromSave(b));
+            if (gameState.campfires) {
+                gameState.campfires.forEach(c => createCampfireFromSave(c));
+            }
             // Note: Animal creation from save is simplified, would need more complex functions for full state
             // For now, we just respawn them. A full implementation would need createBearFromSave etc.
             generateBears(); 
@@ -4441,6 +4970,43 @@ function rotateCamera(dir) {
 
                         }
 
+        function createCampfireFromSave(data) {
+            const fireGeo = new THREE.PlaneGeometry(1, 1);
+            const fireTex = campfireTexture.clone();
+            fireTex.needsUpdate = true;
+            fireTex.wrapS = THREE.RepeatWrapping;
+            fireTex.wrapT = THREE.RepeatWrapping;
+            fireTex.repeat.set(1/5, 1);
+            
+            const fireMat = new THREE.MeshBasicMaterial({
+                map: fireTex,
+                transparent: true,
+                side: THREE.FrontSide,
+                depthWrite: false
+            });
+            
+            const fireMesh = new THREE.Mesh(fireGeo, fireMat);
+            fireMesh.position.set(data.x + 0.5, data.y + 1.5, data.z + 0.5);
+            
+            const fireGroup = new THREE.Group();
+            for (let offsetX = -1; offsetX <= 1; offsetX++) {
+                for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
+                    const copy = fireMesh.clone();
+                    copy.material = fireMat.clone();
+                    copy.position.set(data.x + 0.5 + offsetX * worldSize, data.y + 1.5, data.z + 0.5 + offsetZ * worldSize);
+                    fireGroup.add(copy);
+                }
+            }
+            scene.add(fireGroup);
+            
+            campfires.push({
+                x: data.x, y: data.y, z: data.z,
+                group: fireGroup,
+                creationTime: data.creationTime,
+                animator: new SpriteAnimator(fireTex, 5, 1, 0.15)
+            });
+        }
+
         function downloadSaveGame() {
             const gameState = {
                 playerPos: { x: playerPos.x, y: playerPos.y, z: playerPos.z },
@@ -4452,6 +5018,7 @@ function rotateCamera(dir) {
                 lastRainCycle: lastRainCycle,
                 isRaining: isRaining,
                 rainStartTime: rainStartTime,
+                ownedTools: Array.from(ownedTools),
                 terrain: terrain,
                 trees: trees.map(t => ({
                     x: t.x, y: t.y, z: t.z,
@@ -4473,6 +5040,10 @@ function rotateCamera(dir) {
                     isMedicinalHerb: b.isMedicinalHerb,
                     harvested: b.harvested,
                     harvestTime: b.harvestTime
+                })),
+                campfires: campfires.map(c => ({
+                    x: c.x, y: c.y, z: c.z,
+                    creationTime: c.creationTime
                 })),
                 bears: bears.map(b => ({
                     x: b.position.x, y: b.position.y, z: b.position.z,
@@ -4523,12 +5094,16 @@ rotateCamera( 1)
                             attackAnimalInDirection();
                         } else if (equippedTool.id === TOOLS.FISHING_ROD.id) {
                             startFishing();
+                        } else if (equippedTool.id === TOOLS.SWORD.id) {
+                            attackAnimalInDirection();
                         }
-                    } else if (!equippedTool && selectedMaterial) {
+                    } else if (checkCrafting()) {
+                        // Crafting menu opened
+                    } else if (selectedMaterials.size > 0) {
                         placeBlockInDirection();
-                    } else if (plantingSeeds) {
+                    } else if (plantingSeeds || plantingBushSeeds) {
                         placeBlockInDirection();
-                    } else if (!equippedTool && !selectedMaterial && !plantingSeeds) {
+                    } else if (!equippedTool && selectedMaterials.size === 0 && !plantingSeeds && !plantingBushSeeds) {
                         // Try to pick fruit or harvest herbs
                         pickFruitInDirection();
                         harvestHerbInDirection();
@@ -4550,6 +5125,8 @@ rotateCamera( 1)
                 } else if (event.code === 'KeyH') {
                     useHerb();
                 } else if (event.code === 'KeyZ') {
+                    jump();
+                } else if (event.code === 'KeyN') {
                     if (isNightTime) {
                         sleepPlayer();
                     }
@@ -4652,6 +5229,7 @@ rotateCamera( 1)
                 lastRainCycle: lastRainCycle,
                 isRaining: isRaining,
                 rainStartTime: rainStartTime,
+                ownedTools: Array.from(ownedTools),
                 bears: bears.map(b => ({
                     x: b.x, z: b.z, health: b.health,
                     wanderDirection: { x: b.wanderDirection.x, z: b.wanderDirection.z },
@@ -4683,6 +5261,10 @@ rotateCamera( 1)
                     lastRainCycle = gameState.lastRainCycle || Date.now();
                     isRaining = gameState.isRaining || false;
                     rainStartTime = gameState.rainStartTime || Date.now();
+                    
+                    if (gameState.ownedTools) {
+                        ownedTools = new Set(gameState.ownedTools);
+                    }
                     
                     // Update UI
                     updateInventoryUI();
@@ -4717,7 +5299,12 @@ rotateCamera( 1)
             updateHungerAndHealth(); // Update hunger and health
             updateBears(deltaTime); // Update bear AI and attacks
             updateWolves(deltaTime); // Update wolf AI and attacks
+            updateFollowAnimals(cats, deltaTime);
+            updateFollowAnimals(chickens, deltaTime);
+            updateFollowAnimals(cows, deltaTime);
+            updateFollowAnimals(dragons, deltaTime);
             updateBushes(); // Update bush billboarding and regrowth
+            updateCampfires(deltaTime); // Update campfires
             updateRain(deltaTime); // Update rain system and damage
             updateDayNightCycle(); // Update day/night cycle and lighting
             updateLongAction();
