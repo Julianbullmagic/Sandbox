@@ -1111,10 +1111,10 @@
             
             // Generate new animals using unified system
             // Assuming 4x4 spritesheets for now based on typical assets
-            if (catTexture) generateAnimal('cat', 20, catTexture, 0.5, 0.1, 10, 4, 4);
-            if (chickenTexture) generateAnimal('chicken', 30, chickenTexture, 0.4, 0.08, 8, 4, 4);
-            if (cowTexture) generateAnimal('cow', 15, cowTexture, 1.2, 0.06, 12, 4, 4);
-            if (dragonTexture) generateAnimal('dragon', 5, dragonTexture, 3.0, 0.04, 20, 4, 4);
+            if (catTexture) generateAnimal('cat', 20, catTexture, 0.5, 0.1, 6, 4, 4);
+            if (chickenTexture) generateAnimal('chicken', 30, chickenTexture, 0.4, 0.08, 5, 4, 4);
+            if (cowTexture) generateAnimal('cow', 15, cowTexture, 1.2, 0.06, 7, 4, 4);
+            if (dragonTexture) generateAnimal('dragon', 5, dragonTexture, 3.0, 0.04, 15, 4, 4);
             
             forceSpawnDebugAnimals(); // Spawn one of each near player
             
@@ -1482,9 +1482,19 @@
                 return;
             }
             
-            // Place at feet
-            const x = Math.floor(playerPos.x);
-            const z = Math.floor(playerPos.z);
+            // Determine placement position (in front of player)
+            const cameraDir = new THREE.Vector3();
+            camera.getWorldDirection(cameraDir);
+            
+            // Normalize to grid direction (N, S, E, W or diagonal)
+            let dirX = Math.round(cameraDir.x);
+            let dirZ = Math.round(cameraDir.z);
+            
+            // Fallback if looking straight up/down
+            if (dirX === 0 && dirZ === 0) dirX = 1; 
+
+            const x = Math.floor(playerPos.x + dirX);
+            const z = Math.floor(playerPos.z + dirZ);
             let y = Math.floor(playerPos.y - 1.0);
             
             // Check if spot is valid (solid ground, no existing campfire)
@@ -3214,10 +3224,10 @@
         function forceSpawnDebugAnimals() {
             // Spawn 1 of each near player
             const types = [
-                { type: 'cat', tex: catTexture, scale: 0.5, speed: 0.1, follow: 10 },
-                { type: 'chicken', tex: chickenTexture, scale: 0.4, speed: 0.08, follow: 8 },
-                { type: 'cow', tex: cowTexture, scale: 1.2, speed: 0.06, follow: 12 },
-                { type: 'dragon', tex: dragonTexture, scale: 3.0, speed: 0.04, follow: 20 }
+                { type: 'cat', tex: catTexture, scale: 0.5, speed: 0.1, follow: 6 },
+                { type: 'chicken', tex: chickenTexture, scale: 0.4, speed: 0.08, follow: 5 },
+                { type: 'cow', tex: cowTexture, scale: 1.2, speed: 0.06, follow: 7 },
+                { type: 'dragon', tex: dragonTexture, scale: 3.0, speed: 0.04, follow: 15 }
             ];
             
             console.log("Force spawning debug animals...");
