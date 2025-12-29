@@ -642,6 +642,7 @@
         let longActionDuration = 0;
         let longActionOnComplete = null;
         let miningProgressIndicator;
+        let treeProgressBar;
 
 
         let globalTreeTexture; // Store tree texture globally
@@ -723,7 +724,7 @@
         const WOLF_MAX_HEALTH = 1000;
 //updateFal
         // Camera offset from player - zoomed in 33% closer
-        const cameraOffset = new THREE.Vector3(-1.875, 2.505, -1.875);
+        const cameraOffset = new THREE.Vector3(-1.5, 2.004, -1.5);
 
         // Block materials with frequency property
         const MATERIALS = {
@@ -1194,12 +1195,10 @@
             woodTexture.minFilter = THREE.NearestFilter;
             woodTexture.magFilter = THREE.NearestFilter;
             
-            waterTexture = textureLoader.load('https://res.cloudinary.com/dfksh5mnb/image/upload/v1760436450/R_1_jxujzz.jpg');
+            waterTexture = await loadTexture('https://res.cloudinary.com/dfksh5mnb/image/upload/v1760436450/R_1_jxujzz.jpg');
             waterTexture.wrapS = THREE.RepeatWrapping;
             waterTexture.wrapT = THREE.RepeatWrapping;
             waterTexture.repeat.set(1, 1);
-            waterTexture.minFilter = THREE.NearestFilter;
-            waterTexture.magFilter = THREE.NearestFilter;
             
             generateTerrain();
             generateTrees(treeTexture);
@@ -1225,6 +1224,13 @@
             miningProgressIndicator = new THREE.Mesh(indicatorGeometry, indicatorMaterial);
             miningProgressIndicator.visible = false;
             scene.add(miningProgressIndicator);
+
+            // Tree progress bar
+            const barGeo = new THREE.PlaneGeometry(1.5, 0.2);
+            const barMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide });
+            treeProgressBar = new THREE.Mesh(barGeo, barMat);
+            treeProgressBar.visible = false;
+            scene.add(treeProgressBar);
 
             updateCameraPosition();
             setupControls();
@@ -1570,6 +1576,12 @@
                     miningProgressIndicator.visible = true;
                     miningProgressIndicator.scale.set(0, 0, 0);
                 }
+            } else if (skillName === 'lumberjacking' && target) {
+                // target is the tree object or position
+                treeProgressBar.position.copy(target.position);
+                treeProgressBar.position.y += 2.0; // Place above tree center
+                treeProgressBar.visible = true;
+                treeProgressBar.scale.set(0, 1, 1);
             }
             
             showNotification(`Starting to ${skillName}... (${(longActionDuration/1000).toFixed(1)}s)`);
@@ -1637,7 +1649,8 @@
                 map: fireTex,
                 transparent: true,
                 side: THREE.FrontSide,
-                depthWrite: false
+                depthWrite: true,
+                alphaTest: 0.5
             });
             
             const fireMesh = new THREE.Mesh(fireGeo, fireMat);
@@ -1704,6 +1717,11 @@
             if (longActionType === 'mining') {
                 const scale = Math.min(progress, 1.0);
                 miningProgressIndicator.scale.set(scale, scale, scale);
+            } else if (longActionType === 'lumberjacking') {
+                const scale = Math.min(progress, 1.0);
+                treeProgressBar.scale.x = scale;
+                // Billboard the progress bar
+                treeProgressBar.lookAt(camera.position);
             }
 
             // TODO: Update progress bar UI
@@ -1713,6 +1731,8 @@
                 
                 if (longActionType === 'mining') {
                     miningProgressIndicator.visible = false;
+                } else if (longActionType === 'lumberjacking') {
+                    treeProgressBar.visible = false;
                 }
                 
                 if (longActionOnComplete) {
@@ -1820,7 +1840,8 @@
                     transparent: true,
                     side: THREE.FrontSide,
                     depthTest: true,
-                    depthWrite: false
+                    depthWrite: true,
+                    alphaTest: 0.5
                 });
                 
                 const bearPos = new THREE.Vector3(x + 0.5, topY + 1.6, z + 0.5);
@@ -1972,6 +1993,13 @@
                 }
                 bear.position.y = bearGroundHeight + 0.6;
                 
+                // Optimization: Skip visual updates if far away
+                if (distanceToPlayer > 30) {
+                     bear.group.visible = false;
+                     continue;
+                }
+                bear.group.visible = true;
+
                 // Update all 9 copies of the bear
                 let copyIndex = 0;
                 for (const bearCopy of bear.visuals.children) {
@@ -2097,7 +2125,8 @@
                     transparent: true,
                     side: THREE.FrontSide,
                     depthTest: true,
-                    depthWrite: false
+                    depthWrite: true,
+                    alphaTest: 0.5
                 });
                 
                 const wolfPos = new THREE.Vector3(x + 0.5, topY + 1.45, z + 0.5);
@@ -2245,6 +2274,13 @@
                 }
                 wolf.position.y = wolfGroundHeight + 0.45;
                 
+                // Optimization: Skip visual updates if far away
+                if (distanceToPlayer > 30) {
+                     wolf.group.visible = false;
+                     continue;
+                }
+                wolf.group.visible = true;
+
                 // Update all 9 copies of the wolf
                 let copyIndex = 0;
                 for (const wolfCopy of wolf.visuals.children) {
@@ -2369,7 +2405,8 @@
                     transparent: true,
                     side: THREE.FrontSide,
                     depthTest: true,
-                    depthWrite: false
+                    depthWrite: true,
+                    alphaTest: 0.5
                 });
                 
                 const bushPos = new THREE.Vector3(x + 0.5, topY + 1.0, z + 0.5);
@@ -2409,6 +2446,23 @@
             const now = Date.now();
             
             for (const bush of bushes) {
+                // Optimization: Cull distant bushes
+                // Use squared distance for performance (15^2 = 225)
+                const dx = bush.x - playerPos.x;
+                const dz = bush.z - playerPos.z;
+                // Simple Manhattan-ish check first for speed, or just use wrap corrected
+                const distSq = getWrappedDistanceSq(bush.x, bush.z, playerPos.x, playerPos.z);
+                
+                if (distSq > 225) { // 15 blocks distance (matches fog/view)
+                    bush.group.visible = false;
+                    continue;
+                }
+
+                // Only enable visibility if not harvested
+                if (!bush.harvested) {
+                    bush.group.visible = true;
+                }
+
                 // Make bushes parallel to viewing plane
                 for (const bushCopy of bush.group.children) {
                     // Calculate rotation to face camera (Y-axis only)
@@ -2434,6 +2488,14 @@
                     }
                 }
             }
+        }
+
+        function getWrappedDistanceSq(x1, z1, x2, z2) {
+            const dx = Math.abs(x1 - x2);
+            const dz = Math.abs(z1 - z2);
+            const wrappedDx = Math.min(dx, worldSize - dx);
+            const wrappedDz = Math.min(dz, worldSize - dz);
+            return wrappedDx * wrappedDx + wrappedDz * wrappedDz;
         }
         
         function harvestHerbInDirection() {
@@ -2557,7 +2619,8 @@
                 transparent: true,
                 side: THREE.FrontSide,
                 depthTest: true,
-                depthWrite: false
+                depthWrite: true,
+                alphaTest: 0.5
             });
             
             const bushPos = new THREE.Vector3(targetX + 0.5, topY + 1.0, targetZ + 0.5);
@@ -2828,7 +2891,8 @@
                 side: THREE.FrontSide,  // Use FrontSide to prevent overlap transparency
                 color: 0xffffff,
                 depthTest: true,
-                depthWrite: false  // Don't write to depth buffer to prevent z-fighting
+                depthWrite: true,
+                alphaTest: 0.5
             });
             
             playerSprite = new THREE.Mesh(geometry, spriteMaterial);
@@ -3115,8 +3179,9 @@
                     map: animTex, 
                     transparent: true, 
                     side: THREE.FrontSide, 
-                    depthWrite: false,
-                    depthTest: true
+                    depthWrite: true,
+                    depthTest: true,
+                    alphaTest: 0.5
                 });
                 
                 const mesh = new THREE.Mesh(geo, mat);
@@ -3284,6 +3349,13 @@
                         animal.directionTimer = 0;
                     }
                 }
+                
+                // Optimization: Skip visual updates if far away
+                if (dist > 30) {
+                     animal.group.visible = false;
+                     return; // Skip rest of loop for this animal
+                }
+                animal.group.visible = true;
 
                 // Animation
                 animal.animationTimer += deltaTime;
@@ -3349,7 +3421,7 @@
                 animTex.offset.set(0, 1 - 1/rows);
 
                 const mat = new THREE.MeshBasicMaterial({ 
-                    map: animTex, transparent: true, side: THREE.FrontSide, depthWrite: false 
+                    map: animTex, transparent: true, side: THREE.FrontSide, depthWrite: true, depthTest: true, alphaTest: 0.5
                 });
                 const visuals = new THREE.Group();
                 for (let offsetX = -1; offsetX <= 1; offsetX++) {
@@ -4306,21 +4378,21 @@
             }
         }
 
-        function cutTreeInDirection() {
+        function cutTreeInDirection(silent = false) {
             if (!equippedTool || (equippedTool.id !== TOOLS.AXE.id && equippedTool.id !== TOOLS.PICKAXE.id)) {
-                showNotification("Equip axe or pickaxe first!");
-                return;
+                if (!silent) showNotification("Equip axe or pickaxe first!");
+                return false;
             }
             if (isPerformingLongAction) {
-                showNotification("Already performing an action.");
-                return;
+                if (!silent) showNotification("Already performing an action.");
+                return false;
             }
             if (attackInDirection()) {
-                return; // An attack was initiated
+                return true; // An attack was initiated
             }
             if (playerLastMoveDirection.lengthSq() === 0) {
-                showNotification("Move first to target a tree");
-                return;
+                if (!silent) showNotification("Move first to target a tree");
+                return false;
             }
 
             const playerX = Math.round(playerPos.x);
@@ -4354,7 +4426,7 @@
                 scene.remove(bush.group);
                 bushes.splice(bushIndex, 1);
                 updateInventoryUI();
-                return;
+                return true;
             }
 
             // Find tree at target position
@@ -4365,8 +4437,8 @@
             );
 
             if (treeIndex !== -1) {
+                const tree = trees[treeIndex];
                 const onComplete = () => {
-                    const tree = trees[treeIndex];
                     if (!tree || tree.isFalling) return;
 
                     const treeType = TREE_TYPES[tree.type];
@@ -4396,10 +4468,13 @@
                     baseDuration = 60000; // Pickaxe is 2x slower
                 }
 
-                startLongAction('lumberjacking', onComplete, null, baseDuration);
+                // Pass tree object as target for visual feedback
+                startLongAction('lumberjacking', onComplete, tree, baseDuration);
+                return true;
 
             } else {
-                showNotification("No tree to cut");
+                if (!silent) showNotification("No tree to cut");
+                return false;
             }
         }
 
@@ -4563,7 +4638,8 @@ function createTreeMesh(typeId) {
         transparent: true,
         side: THREE.FrontSide,
         depthTest: true,
-        depthWrite: false
+        depthWrite: true,
+        alphaTest: 0.5
     });
     // Apply a random tint so trees vary in color subtly
     mat.color.set(randomTreeTint());
@@ -4973,8 +5049,8 @@ showNotification(`Planted a ${TREE_TYPES[treeType].name} sapling`);
 
 function updateCameraPosition() {
     // distance and height stay the same
-    const radius = cameraOffset.length();
-    const height = 2.505;               // adjusted height for zoomed in camera
+    const radius = Math.sqrt(cameraOffset.x * cameraOffset.x + cameraOffset.z * cameraOffset.z);
+    const height = cameraOffset.y;               // adjusted height for zoomed in camera
 
     // compute horizontal orbit position
     // Camera follows player position directly (wrapping is handled by player position updates)
@@ -5259,7 +5335,7 @@ function rotateCamera(dir) {
 
                             bushTex.offset.set(0, 1 - (bushData.type + 1) * frameH);
 
-                            const bushMat = new THREE.MeshBasicMaterial({ map: bushTex, transparent: true, side: THREE.FrontSide, depthTest: true, depthWrite: false });
+                            const bushMat = new THREE.MeshBasicMaterial({ map: bushTex, transparent: true, side: THREE.FrontSide, depthTest: true, depthWrite: true, alphaTest: 0.5 });
 
                             
 
@@ -5325,7 +5401,8 @@ function rotateCamera(dir) {
                 map: fireTex,
                 transparent: true,
                 side: THREE.FrontSide,
-                depthWrite: false
+                depthWrite: true,
+                alphaTest: 0.5
             });
             
             const fireMesh = new THREE.Mesh(fireGeo, fireMat);
@@ -5430,7 +5507,10 @@ rotateCamera( 1)
                     if (equippedTool) {
                         startToolAnimation();
                         if (equippedTool.id === TOOLS.PICKAXE.id) {
-                            destroyBlockInDirection();
+                            // Try cutting tree first (silent), if fail then mine block
+                            if (!cutTreeInDirection(true)) {
+                                destroyBlockInDirection();
+                            }
                             attackAnimalInDirection();
                         } else if (equippedTool.id === TOOLS.AXE.id) {
                             cutTreeInDirection();
@@ -5684,51 +5764,54 @@ rotateCamera( 1)
         function updateObjectTransparency() {
             const playerDistToCamera = player.position.distanceTo(camera.position);
 
-            const allObjects = [...trees, ...bushes];
+            const updateTransparencyForList = (list) => {
+                for (const obj of list) {
+                    if (!obj.group || !obj.position || !obj.group.visible) continue;
 
-            for (const obj of allObjects) {
-                if (!obj.group || !obj.position) continue;
+                    const objDistToCamera = obj.position.distanceTo(camera.position);
 
-                const objDistToCamera = obj.position.distanceTo(camera.position);
+                    let targetOpacity = 1.0;
+                    let makeTransparent = false;
 
-                let targetOpacity = 1.0;
-                let makeTransparent = false;
-
-                if (objDistToCamera < playerDistToCamera - 1.0) {
-                    makeTransparent = true;
-                    const closeness = objDistToCamera / (playerDistToCamera - 1.0);
-                    targetOpacity = Math.pow(closeness, 2);
-                    targetOpacity = Math.max(0.0, Math.min(1.0, targetOpacity));
-                }
-
-                const processGroup = (group) => {
-                    for (const child of group.children) {
-                        if (child.isMesh) {
-                            const material = child.material;
-                            
-                            const newOpacity = makeTransparent ? targetOpacity : 1.0;
-                            
-                            if (Math.abs(material.opacity - newOpacity) > 0.01) {
-                                material.opacity = THREE.MathUtils.lerp(material.opacity, newOpacity, 0.1);
-                            } else {
-                                material.opacity = newOpacity;
-                            }
-
-                            if (material.opacity < 0.99) {
-                                material.depthWrite = false;
-                            } else {
-                                material.depthWrite = true;
-                            }
-                            material.transparent = true;
-
-                        } else if (child.isGroup) {
-                            processGroup(child);
-                        }
+                    if (objDistToCamera < playerDistToCamera - 1.0) {
+                        makeTransparent = true;
+                        const closeness = objDistToCamera / (playerDistToCamera - 1.0);
+                        targetOpacity = Math.pow(closeness, 2);
+                        targetOpacity = Math.max(0.0, Math.min(1.0, targetOpacity));
                     }
-                };
-                
-                processGroup(obj.group);
-            }
+
+                    const processGroup = (group) => {
+                        for (const child of group.children) {
+                            if (child.isMesh) {
+                                const material = child.material;
+                                
+                                const newOpacity = makeTransparent ? targetOpacity : 1.0;
+                                
+                                if (Math.abs(material.opacity - newOpacity) > 0.01) {
+                                    material.opacity = THREE.MathUtils.lerp(material.opacity, newOpacity, 0.1);
+                                } else {
+                                    material.opacity = newOpacity;
+                                }
+
+                                if (material.opacity < 0.99) {
+                                    material.depthWrite = false;
+                                } else {
+                                    material.depthWrite = true;
+                                }
+                                material.transparent = true;
+
+                            } else if (child.isGroup) {
+                                processGroup(child);
+                            }
+                        }
+                    };
+                    
+                    processGroup(obj.group);
+                }
+            };
+            
+            updateTransparencyForList(trees);
+            updateTransparencyForList(bushes);
         }
 
         function cancelLongAction() {
@@ -5736,6 +5819,8 @@ rotateCamera( 1)
                 isPerformingLongAction = false;
                 if (longActionType === 'mining') {
                     miningProgressIndicator.visible = false;
+                } else if (longActionType === 'lumberjacking') {
+                    treeProgressBar.visible = false;
                 }
                 longActionOnComplete = null;
                 showNotification("Action cancelled.");
