@@ -350,6 +350,103 @@
             right: 0;
             border-radius: 5px 0 0 5px;
         }
+        #helpButton {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 50;
+            background: #FF9800;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            font-size: 24px;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s, background 0.2s;
+        }
+
+        #helpButton:hover {
+            transform: scale(1.1);
+            background: #F57C00;
+        }
+
+        #helpModal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(5px);
+        }
+
+        .help-content {
+            background: linear-gradient(135deg, #2c3e50, #4ca1af);
+            width: 80%;
+            max-width: 800px;
+            max-height: 85vh;
+            border-radius: 15px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            padding: 30px;
+            overflow-y: auto;
+            color: white;
+            position: relative;
+            border: 2px solid rgba(255,255,255,0.1);
+        }
+
+        .help-content h2 {
+            margin-top: 0;
+            color: #FF9800;
+            text-align: center;
+            border-bottom: 2px solid rgba(255,255,255,0.1);
+            padding-bottom: 15px;
+        }
+
+        .help-content h3 {
+            color: #87CEEB;
+            margin-top: 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            padding-bottom: 5px;
+        }
+
+        .help-section {
+            margin-bottom: 20px;
+        }
+
+        .close-help {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            font-size: 30px;
+            color: rgba(255,255,255,0.7);
+            cursor: pointer;
+            background: none;
+            border: none;
+            transition: color 0.2s;
+        }
+
+        .close-help:hover {
+            color: white;
+        }
+        
+        .key-badge {
+            background: rgba(0,0,0,0.3);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            border: 1px solid rgba(255,255,255,0.2);
+            color: #FF9800;
+        }
     </style>
 </head>
 <body>
@@ -452,7 +549,7 @@
         // Game variables
         let scene, camera, renderer;
         let player, terrain = [], blockMeshes = [], trees = [];
-        let worldSize = 240;
+        let worldSize = 120;
         let blockSize = 1;
         
         // Material caching for better performance
@@ -461,8 +558,10 @@
         let cachedMetalMaterial = null;
         let cachedWoodMaterial = null;
         let cachedWaterMaterial = null;
+        let cachedWaterMaterialBottom = null;
+        let cachedWaterMaterialTop = null;
         let noiseScale = 0.05;
-        let playerPos = new THREE.Vector3(120, 0, 120); // Center of 240x240 world
+        let playerPos = new THREE.Vector3(60, 0, 60); // Center of 120x120 world
         let keys = {};
         let cameraAngle = 0;        // radians around the player
         const rotationSpeed = 0.03; // radians per key-press
@@ -794,10 +893,10 @@
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x87CEEB);
             
-            // Add fog for reduced draw distance - adjusted for larger world
-            scene.fog = new THREE.Fog(0x87CEEB, 20, 50); // Start at 20 blocks, complete at 50 blocks
+            // Add fog for reduced draw distance - 2x closer
+            scene.fog = new THREE.Fog(0x87CEEB, 5, 15); // Start at 5 blocks, complete at 15 blocks
 
-            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 60); // Increased far plane to 60
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 25); // Reduced far plane to 25
 
             renderer = new THREE.WebGLRenderer({ 
                 antialias: false,
@@ -815,7 +914,7 @@
             scene.add(ambientLight);
 
             directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
-            directionalLight.position.set(120, 50, 120);
+            directionalLight.position.set(60, 50, 60);
             scene.add(directionalLight);
 
             // Load textures
@@ -2224,7 +2323,7 @@
         }
 
         function generateBushes() {
-            const numBushes = 300; // Triple the bushes for 3x larger world
+            const numBushes = 1000; // Increased for larger world
             const placedPositions = new Set();
             
             for (let i = 0; i < numBushes; i++) {
@@ -2496,7 +2595,7 @@
         }
 
      function generateTrees(treeTexture) {
-    const numTrees = 600; // Triple the trees for 3x larger world
+    const numTrees = 2000; // Increased for larger world
     const placedPositions = new Set();
     const minTreeDistance = 2; // Minimum distance between trees
 
@@ -3571,14 +3670,56 @@
                 }
                 blockMaterial = cachedWoodMaterial;
             } else if (materialType.id === MATERIALS.WATER.id) {
-                if (!cachedWaterMaterial) {
-                    cachedWaterMaterial = new THREE.MeshLambertMaterial({
-                        map: waterTexture,
-                        transparent: true,
-                        opacity: 0.8
+                if (!cachedWaterMaterialBottom) {
+                    const texBottom = waterTexture.clone();
+                    texBottom.needsUpdate = true;
+                    texBottom.wrapS = THREE.RepeatWrapping;
+                    texBottom.wrapT = THREE.RepeatWrapping;
+                    
+                    cachedWaterMaterialBottom = new THREE.MeshLambertMaterial({
+                        map: texBottom,
+                        transparent: false,
+                        opacity: 1.0
                     });
                 }
-                blockMaterial = cachedWaterMaterial;
+                
+                if (!cachedWaterMaterialTop) {
+                    const texTop = waterTexture.clone();
+                    texTop.needsUpdate = true;
+                    texTop.wrapS = THREE.RepeatWrapping;
+                    texTop.wrapT = THREE.RepeatWrapping;
+                    
+                    cachedWaterMaterialTop = new THREE.MeshLambertMaterial({
+                        map: texTop,
+                        transparent: true,
+                        opacity: 0.5
+                    });
+                }
+                
+                const blockGroup = new THREE.Group();
+                
+                for (let offsetX = -1; offsetX <= 1; offsetX++) {
+                    for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
+                        // Bottom Layer
+                        const bottomMesh = new THREE.Mesh(geometry, cachedWaterMaterialBottom);
+                        bottomMesh.position.set(
+                            x + offsetX * worldSize, 
+                            y, 
+                            z + offsetZ * worldSize
+                        );
+                        
+                        // Top Layer (child of bottom)
+                        const topMesh = new THREE.Mesh(geometry, cachedWaterMaterialTop);
+                        topMesh.position.set(0, 0.05, 0); // Slight offset
+                        bottomMesh.add(topMesh);
+                        
+                        blockGroup.add(bottomMesh);
+                    }
+                }
+                
+                scene.add(blockGroup);
+                return blockGroup;
+
             } else {
                 blockMaterial = new THREE.MeshLambertMaterial({ color: materialType.color });
             }
@@ -5482,6 +5623,19 @@ rotateCamera( 1)
             }
         }
 
+        function updateWater(deltaTime) {
+            if (cachedWaterMaterialBottom && cachedWaterMaterialBottom.map) {
+                // Bottom layer moves in one direction
+                cachedWaterMaterialBottom.map.offset.x += deltaTime * 0.05;
+                cachedWaterMaterialBottom.map.offset.y += deltaTime * 0.05;
+            }
+            if (cachedWaterMaterialTop && cachedWaterMaterialTop.map) {
+                // Top layer moves in same direction but slower
+                cachedWaterMaterialTop.map.offset.x += deltaTime * 0.025;
+                cachedWaterMaterialTop.map.offset.y += deltaTime * 0.025;
+            }
+        }
+
         let billboardTargetPoint = new THREE.Vector3();
 
         function animate() {
@@ -5508,6 +5662,7 @@ rotateCamera( 1)
             
             updateBushes(); // Update bush billboarding and regrowth
             updateCampfires(deltaTime); // Update campfires
+            updateWater(deltaTime); // Update water animation
             updateRain(deltaTime); // Update rain system and damage
             updateDayNightCycle(); // Update day/night cycle and lighting
             updateLongAction();
@@ -5707,6 +5862,75 @@ rotateCamera( 1)
         });
 
         init();
+    </script>
+    <button id="helpButton" title="How to Play">?</button>
+
+    <div id="helpModal">
+        <div class="help-content">
+            <button class="close-help">&times;</button>
+            <h2>How to Play</h2>
+            
+            <div class="help-section">
+                <h3>🗺️ Basics & Goal</h3>
+                <p>Welcome to the Sandbox! Your goal is to survive, gather resources, craft tools, and build your world. Explore the generated terrain, mine ores, chop trees, and fight off dangerous animals.</p>
+            </div>
+
+            <div class="help-section">
+                <h3>🎮 Controls</h3>
+                <ul>
+                    <li><span class="key-badge">WASD</span> or <span class="key-badge">Arrows</span> : Move Player</li>
+                    <li><span class="key-badge">Shift</span> : <b>Action Key</b> (Mine Rock, Chop Tree, Attack, Fish)</li>
+                    <li><span class="key-badge">Alt</span> : Place selected block</li>
+                    <li><span class="key-badge">Space</span> : Use Tool Special / Create Campfire (if Wood selected)</li>
+                    <li><span class="key-badge">Z</span> : Jump</li>
+                    <li><span class="key-badge">Q</span> / <span class="key-badge">E</span> : Rotate Camera</li>
+                    <li><span class="key-badge">F</span> : Eat Fruit (Restores Hunger)</li>
+                    <li><span class="key-badge">H</span> : Use Herb (Restores Health)</li>
+                    <li><span class="key-badge">N</span> : Sleep (Only at Night)</li>
+                </ul>
+            </div>
+
+            <div class="help-section">
+                <h3>❤️ Survival (Health & Hunger)</h3>
+                <p><b>Health:</b> You lose health from monster attacks and staying up too late at night in the rain/cold. Eat Herbs to heal.</p>
+                <p><b>Hunger:</b> Performing actions drains hunger. If you starve, you lose health. Eat Fruits found on trees/bushes.</p>
+                <p><b>Night Cycle:</b> Night is dangerous! Monsters may appear, and the cold drains health. Press <span class="key-badge">N</span> to sleep through the night, or build a shelter/fire.</p>
+            </div>
+
+            <div class="help-section">
+                <h3>⚒️ Skills & Tools</h3>
+                <p><b>Mining:</b> Use a Pickaxe (or hands) on rocks. Level up to mine faster.</p>
+                <p><b>Woodcutting:</b> Use an Axe (or hands) on trees. Higher levels chop faster.</p>
+                <p><b>Combat:</b> Use a Sword to fight animals. Defeating them grants XP.</p>
+                <p><b>Crafting:</b> Use the inventory menu (Right side) to craft tools. Select materials to place them.</p>
+            </div>
+
+            <div class="help-section">
+                <h3>🔥 Special Actions</h3>
+                <p><b>Campfire:</b> To build a fire, select <b>Wood</b> in your inventory, ensure no tool is equipped, and press <span class="key-badge">Space</span>. This provides light and warmth at night.</p>
+                <p><b>Farming:</b> Select Seeds and press <span class="key-badge">Alt</span> on soil to plant trees/bushes.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const helpButton = document.getElementById('helpButton');
+        const helpModal = document.getElementById('helpModal');
+        const closeHelp = document.querySelector('.close-help');
+
+        helpButton.addEventListener('click', () => {
+            helpModal.style.display = 'flex';
+        });
+
+        closeHelp.addEventListener('click', () => {
+            helpModal.style.display = 'none';
+        });
+
+        helpModal.addEventListener('click', (e) => {
+            if (e.target === helpModal) {
+                helpModal.style.display = 'none';
+            }
+        });
     </script>
 </body>
 </html>
