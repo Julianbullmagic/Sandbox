@@ -827,7 +827,7 @@
                 tex.magFilter = THREE.NearestFilter;
             });
             
-            const loadTextureWithTransparency = (url, fallbackColor = 0xFF00FF) => new Promise(resolve => {
+            const loadTextureWithTransparency = (url, fallbackColor = 0xFF00FF, threshold = 215) => new Promise(resolve => {
                 const img = new Image();
                 img.crossOrigin = 'anonymous';
                 img.onload = () => {
@@ -838,19 +838,58 @@
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0);
                     
-                    // Get image data and make white pixels transparent
+                    // Get image data and use flood fill to make background transparent
                     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                     const data = imageData.data;
+                    const width = canvas.width;
+                    const height = canvas.height;
                     
-                    for (let i = 0; i < data.length; i += 4) {
-                        const r = data[i];
-                        const g = data[i + 1];
-                        const b = data[i + 2];
+                    // Threshold for "off white" background (to catch artifacts/snow)
+                    const isBackground = (r, g, b) => r > threshold && g > threshold && b > threshold;
+                    
+                    const visited = new Uint8Array(width * height);
+                    const stack = []; // Stack for DFS
+                    
+                    // Helper to check and process a pixel
+                    const check = (x, y) => {
+                        if (x < 0 || x >= width || y < 0 || y >= height) return;
+                        const idx = y * width + x;
+                        if (visited[idx]) return;
                         
-                        // If pixel is white or near-white, make it transparent
-                        if (r > 240 && g > 240 && b > 240) {
-                            data[i + 3] = 0; // Set alpha to 0
+                        visited[idx] = 1; // Mark as visited
+                        
+                        const i = idx * 4;
+                        const r = data[i];
+                        const g = data[i+1];
+                        const b = data[i+2];
+                        
+                        if (isBackground(r, g, b)) {
+                            data[i+3] = 0; // Set alpha to 0 (Transparent)
+                            stack.push(idx); // Continue search from here
                         }
+                    };
+                    
+                    // Start flood fill from all borders
+                    // This ensures we catch the background even if sprites touch some edges
+                    for(let x = 0; x < width; x++) {
+                        check(x, 0);
+                        check(x, height - 1);
+                    }
+                    for(let y = 0; y < height; y++) {
+                        check(0, y);
+                        check(width - 1, y);
+                    }
+                    
+                    // Process the stack
+                    while(stack.length > 0) {
+                        const idx = stack.pop();
+                        const cx = idx % width;
+                        const cy = Math.floor(idx / width);
+                        
+                        check(cx - 1, cy);
+                        check(cx + 1, cy);
+                        check(cx, cy - 1);
+                        check(cx, cy + 1);
                     }
                     
                     ctx.putImageData(imageData, 0, 0);
@@ -945,7 +984,7 @@
             campfireTexture = await loadTextureWithTransparency('https://res.cloudinary.com/dfksh5mnb/image/upload/v1705104302/CampFireFinished_xozgsa.png');
 
             // Load animal textures
-            catTexture = await loadTextureWithTransparency('https://res.cloudinary.com/dfksh5mnb/image/upload/v1765429473/cat_uq5dty.jpg', 0xFFA500);
+            catTexture = await loadTextureWithTransparency('https://res.cloudinary.com/dfksh5mnb/image/upload/v1765429473/cat_uq5dty.jpg', 0xFFA500, 240);
             chickenTexture = await loadTextureWithTransparency('https://res.cloudinary.com/dfksh5mnb/image/upload/v1765284202/chicken_ykypbk.jpg', 0xFFFFFF);
             // Assuming these are the generated images for Cow and Dragon based on previous context
             cowTexture = await loadTextureWithTransparency('https://res.cloudinary.com/dfksh5mnb/image/upload/v1765285447/Gemini_Generated_Image_53p13f53p13f53p1_qxrpg9.png', 0x8B4513); 
@@ -1069,6 +1108,16 @@
             generateBushes(); // Spawn bushes
             generateBears(); // Spawn bears
             generateWolves(); // Spawn wolves
+            
+            // Generate new animals using unified system
+            // Assuming 4x4 spritesheets for now based on typical assets
+            if (catTexture) generateAnimal('cat', 20, catTexture, 0.5, 0.1, 10, 4, 4);
+            if (chickenTexture) generateAnimal('chicken', 30, chickenTexture, 0.4, 0.08, 8, 4, 4);
+            if (cowTexture) generateAnimal('cow', 15, cowTexture, 1.2, 0.06, 12, 4, 4);
+            if (dragonTexture) generateAnimal('dragon', 5, dragonTexture, 3.0, 0.04, 20, 4, 4);
+            
+            forceSpawnDebugAnimals(); // Spawn one of each near player
+            
             createPlayer();
 
             // Mining progress indicator
@@ -2913,93 +2962,8 @@
 
         // ...
 
-        function generateCats() {
-            const num = 20; // Increased from 5
-            console.log("Generating Cats...");
-            let spawned = 0;
-            for (let i = 0; i < num; i++) {
-                const pos = findRandomSpawnPosition();
-                if (!pos) continue;
-                
-                const geo = new THREE.PlaneGeometry(0.5, 0.5); // Small
-                const mat = new THREE.MeshBasicMaterial({ map: catTexture, transparent: true, side: THREE.FrontSide, depthWrite: false });
-                const mesh = new THREE.Mesh(geo, mat);
-                mesh.position.copy(pos);
-                
-                const group = createWrappedGroup(mesh, pos);
-                scene.add(group);
-                
-                cats.push({ group, position: pos, type: 'cat', speed: 0.1, followDistance: 10, stopDistance: 1.5 });
-                spawned++;
-            }
-            console.log(`Spawned ${spawned} cats`);
-        }
-
-        function generateChickens() {
-            const num = 30; // Increased from 10
-            console.log("Generating Chickens...");
-            let spawned = 0;
-            for (let i = 0; i < num; i++) {
-                const pos = findRandomSpawnPosition();
-                if (!pos) continue;
-                
-                const geo = new THREE.PlaneGeometry(0.4, 0.4); // Very small
-                const mat = new THREE.MeshBasicMaterial({ map: chickenTexture, transparent: true, side: THREE.FrontSide, depthWrite: false });
-                const mesh = new THREE.Mesh(geo, mat);
-                mesh.position.copy(pos);
-                
-                const group = createWrappedGroup(mesh, pos);
-                scene.add(group);
-                
-                chickens.push({ group, position: pos, type: 'chicken', speed: 0.08, followDistance: 8, stopDistance: 1.0 });
-                spawned++;
-            }
-            console.log(`Spawned ${spawned} chickens`);
-        }
-
-        function generateCows() {
-            const num = 15; // Increased from 5
-            console.log("Generating Cows...");
-            let spawned = 0;
-            for (let i = 0; i < num; i++) {
-                const pos = findRandomSpawnPosition();
-                if (!pos) continue;
-                
-                const geo = new THREE.PlaneGeometry(1.2, 1.0); // Normal/Large
-                const mat = new THREE.MeshBasicMaterial({ map: cowTexture, transparent: true, side: THREE.FrontSide, depthWrite: false });
-                const mesh = new THREE.Mesh(geo, mat);
-                mesh.position.copy(pos);
-                
-                const group = createWrappedGroup(mesh, pos);
-                scene.add(group);
-                
-                cows.push({ group, position: pos, type: 'cow', speed: 0.06, followDistance: 12, stopDistance: 2.0 });
-                spawned++;
-            }
-            console.log(`Spawned ${spawned} cows`);
-        }
-
-        function generateDragons() {
-            const num = 5; // Increased from 2
-            console.log("Generating Dragons...");
-            let spawned = 0;
-            for (let i = 0; i < num; i++) {
-                const pos = findRandomSpawnPosition();
-                if (!pos) continue;
-                
-                const geo = new THREE.PlaneGeometry(3.0, 3.0); // 3x bigger
-                const mat = new THREE.MeshBasicMaterial({ map: dragonTexture, transparent: true, side: THREE.FrontSide, depthWrite: false });
-                const mesh = new THREE.Mesh(geo, mat);
-                mesh.position.copy(pos);
-                
-                const group = createWrappedGroup(mesh, pos);
-                scene.add(group);
-                
-                dragons.push({ group, position: pos, type: 'dragon', speed: 0.04, wander: true });
-                spawned++;
-            }
-            console.log(`Spawned ${spawned} dragons`);
-        }
+        // Unified Animal System
+        let otherAnimals = []; // Cats, Chickens, Cows, Dragons
 
         function findRandomSpawnPosition() {
             for(let i=0; i<50; i++) {
@@ -3016,43 +2980,136 @@
             return null;
         }
 
-        function createWrappedGroup(mesh, pos) {
-            const group = new THREE.Group();
-            for (let offsetX = -1; offsetX <= 1; offsetX++) {
-                for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
-                    const copy = mesh.clone();
-                    copy.position.set(pos.x + offsetX * worldSize, pos.y, pos.z + offsetZ * worldSize);
-                    group.add(copy);
+        function generateAnimal(type, count, texture, scale, speed, followDist, cols = 4, rows = 4) {
+            console.log(`Generating ${count} ${type}s...`);
+            let spawned = 0;
+            
+            // Configure texture for sprite sheet
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            const frameW = 1 / cols;
+            const frameH = 1 / rows;
+
+            for (let i = 0; i < count; i++) {
+                const pos = findRandomSpawnPosition();
+                if (!pos) continue;
+                
+                const geo = new THREE.PlaneGeometry(scale, scale);
+                
+                // Clone texture for independent animation
+                const animTex = texture.clone();
+                animTex.needsUpdate = true;
+                animTex.repeat.set(frameW, frameH);
+                animTex.offset.set(0, 1 - frameH); // Start frame
+                
+                const mat = new THREE.MeshBasicMaterial({ 
+                    map: animTex, 
+                    transparent: true, 
+                    side: THREE.FrontSide, 
+                    depthWrite: false,
+                    depthTest: true
+                });
+                
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.copy(pos);
+                
+                // Create wrapped group (9 copies)
+                const visuals = new THREE.Group();
+                for (let offsetX = -1; offsetX <= 1; offsetX++) {
+                    for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
+                        const copy = new THREE.Mesh(geo, mat); 
+                        copy.position.set(
+                            pos.x + offsetX * worldSize,
+                            pos.y,
+                            pos.z + offsetZ * worldSize
+                        );
+                        visuals.add(copy);
+                    }
                 }
+                
+                const healthBar = createHealthBar();
+                healthBar.visible = false;
+                
+                const group = new THREE.Group();
+                group.add(visuals);
+                group.add(healthBar);
+                scene.add(group);
+                
+                // Health stats
+                let maxHealth = 100;
+                if (type === 'dragon') maxHealth = 5000;
+                else if (type === 'cow') maxHealth = 200;
+                else if (type === 'cat') maxHealth = 50;
+                else if (type === 'chicken') maxHealth = 30;
+                
+                otherAnimals.push({
+                    type: type,
+                    group: group,
+                    visuals: visuals,
+                    healthBar: healthBar,
+                    position: pos,
+                    speed: speed,
+                    followDistance: followDist,
+                    wanderDir: new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5).normalize(),
+                    wanderTimer: 0,
+                    // Animation state
+                    cols: cols,
+                    rows: rows,
+                    currentFrame: 0,
+                    animationTimer: 0,
+                    directionRow: 0,
+                    lastDirectionRow: 0, // For hysteresis
+                    directionTimer: 0,   // For hysteresis
+                    // Stats
+                    health: maxHealth,
+                    maxHealth: maxHealth,
+                    lastAttackTime: 0
+                });
+                spawned++;
             }
-            return group;
+            console.log(`Spawned ${spawned} ${type}s`);
         }
 
-        function updateFollowAnimals(animals, deltaTime) {
-            if (animals.length > 0 && Math.random() < 0.01) {
-                 console.log(`Updating ${animals.length} animals of type ${animals[0].type}. First pos: ${JSON.stringify(animals[0].position)}`);
-            }
-            animals.forEach(animal => {
+        function updateOtherAnimals(deltaTime) {
+            const now = Date.now();
+            otherAnimals.forEach(animal => {
                 const dist = getWrappedDistance(animal.position.x, animal.position.z, playerPos.x, playerPos.z);
                 
-                let moveDir = new THREE.Vector3(0,0,0);
+                // Health Bar
+                animal.healthBar.visible = dist < 10; // Show if reasonably close
+                // Update health bar visual
+                animal.healthBar.scale.x = Math.max(0, animal.health / animal.maxHealth);
+                animal.healthBar.material.color.set(animal.health > animal.maxHealth * 0.5 ? 0x00ff00 : 0xff0000);
                 
-                if (animal.wander) {
-                    // Random wander logic (simplified)
-                    if (Math.random() < 0.02) {
-                        animal.wanderDir = new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5).normalize();
-                    }
-                    if (animal.wanderDir) moveDir = animal.wanderDir;
-                } else if (dist < animal.followDistance && dist > animal.stopDistance) {
-                    // Follow player
+                let moveDir = new THREE.Vector3(0,0,0);
+                let isMoving = false;
+                
+                // Behavior
+                if (dist < animal.followDistance && dist > 2.0) {
                     moveDir = getWrappedDirection(animal.position.x, animal.position.z, playerPos.x, playerPos.z);
-                } else if (Math.random() < 0.01) {
-                     // Occasional idle wander
-                     animal.wanderDir = new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5).normalize();
-                     moveDir = animal.wanderDir;
+                    isMoving = true;
+                } else if (animal.type === 'dragon' && dist <= 2.0) {
+                    // Dragon attack
+                    if (now - animal.lastAttackTime > 2000) {
+                        health = Math.max(0, health - 15); // Dragon does 15 damage
+                        animal.lastAttackTime = now;
+                        updateStatsUI();
+                        showNotification("Dragon breath! -15 HP", 1000);
+                        if (health === 0) showGameOver("You were incinerated by a dragon!");
+                    }
+                } else {
+                    animal.wanderTimer -= deltaTime;
+                    if (animal.wanderTimer <= 0) {
+                        animal.wanderDir = new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5).normalize();
+                        animal.wanderTimer = 2.0 + Math.random() * 3.0;
+                    }
+                    moveDir = animal.wanderDir;
+                    // Move slower when wandering?
+                    moveDir.multiplyScalar(0.5); 
+                    isMoving = true;
                 }
 
-                if (moveDir.lengthSq() > 0) {
+                if (isMoving) {
                     animal.position.x += moveDir.x * animal.speed;
                     animal.position.z += moveDir.z * animal.speed;
                     
@@ -3062,38 +3119,173 @@
                     if (animal.position.z < 0) animal.position.z += worldSize;
                     if (animal.position.z >= worldSize) animal.position.z -= worldSize;
                     
-                    // Height adjustment
+                    // Update Y
                     const gx = Math.floor(animal.position.x);
                     const gz = Math.floor(animal.position.z);
-                    let gy = 0;
-                    // find top block
+                    let groundY = 0;
                     if (terrain[gx] && terrain[gx][gz]) {
                          for(let y=worldSize-1; y>=0; y--) {
                              if (terrain[gx][gz][y] !== undefined) {
-                                 gy = y + 1;
+                                 groundY = y + 1;
                                  break;
                              }
                          }
                     }
-                    animal.position.y = gy + (animal.type === 'dragon' ? 1.5 : 0.5); // Offset based on size
+                    let offset = 0.5;
+                    let barOffset = 1.0;
+                    if (animal.type === 'dragon') { offset = 1.5; barOffset = 3.0; }
+                    else if (animal.type === 'cow') { offset = 0.6; barOffset = 1.2; }
+                    
+                    animal.position.y = groundY + offset;
+                    
+                    // Update health bar position
+                    animal.healthBar.position.set(animal.position.x, animal.position.y + barOffset, animal.position.z);
+                    
+                    // Determine Direction Row with Hysteresis
+                    const cameraForward = new THREE.Vector3();
+                    cameraForward.subVectors(camera.position, playerPos).normalize();
+                    cameraForward.y = 0; cameraForward.normalize();
+                    const cameraRight = new THREE.Vector3();
+                    cameraRight.crossVectors(cameraForward, new THREE.Vector3(0, 1, 0)).normalize();
+                    
+                    const moveNorm = moveDir.clone().normalize();
+                    const dotForward = moveNorm.dot(cameraForward);
+                    const dotRight = moveNorm.dot(cameraRight);
+                    
+                    let newRow = animal.directionRow;
+                    
+                    // Only change direction if movement is significant in that direction (hysteresis)
+                    if (Math.abs(dotForward) > Math.abs(dotRight)) {
+                        if (dotForward > 0.2) newRow = 0; // Front
+                        else if (dotForward < -0.2) newRow = 3; // Back
+                    } else {
+                        if (dotRight > 0.2) newRow = 1; // Right
+                        else if (dotRight < -0.2) newRow = 2; // Left
+                    }
+                    
+                    // Only apply change if sustained or timer elapsed
+                    if (newRow !== animal.lastDirectionRow) {
+                        animal.directionTimer += deltaTime;
+                        if (animal.directionTimer > 0.2) { // 200ms delay before switching
+                            animal.directionRow = newRow;
+                            animal.lastDirectionRow = newRow;
+                            animal.directionTimer = 0;
+                        }
+                    } else {
+                        animal.directionTimer = 0;
+                    }
                 }
 
-                // Update group copies
-                let idx = 0;
-                animal.group.children.forEach(mesh => {
-                    const ox = (idx % 3 - 1) * worldSize;
-                    const oz = (Math.floor(idx / 3) - 1) * worldSize;
+                // Animation
+                animal.animationTimer += deltaTime;
+                if (animal.animationTimer > 0.15) {
+                    animal.currentFrame = (animal.currentFrame + 1) % animal.cols;
+                    animal.animationTimer = 0;
+                }
+
+                // Update Visuals
+                const frameW = 1 / animal.cols;
+                const frameH = 1 / animal.rows;
+                
+                // Billboard Health Bar
+                const camAngle = Math.atan2(camera.position.x - animal.healthBar.position.x, camera.position.z - animal.healthBar.position.z);
+                animal.healthBar.rotation.y = camAngle;
+                
+                animal.visuals.children.forEach((mesh, i) => {
+                    // Position
+                    const ox = (i % 3 - 1) * worldSize;
+                    const oz = (Math.floor(i / 3) - 1) * worldSize;
                     mesh.position.set(animal.position.x + ox, animal.position.y, animal.position.z + oz);
                     
-                    // Billboard
+                    // Billboard Animal
                     const angle = Math.atan2(camera.position.x - mesh.position.x, camera.position.z - mesh.position.z);
                     mesh.rotation.y = angle;
                     
-                    // Flip based on movement? (Simplified: just billboard)
-                    idx++;
+                    // Texture Update
+                    if (i === 0) { // Update only once per animal group
+                        mesh.material.map.repeat.set(frameW, frameH);
+                        mesh.material.map.offset.x = animal.currentFrame * frameW;
+                        mesh.material.map.offset.y = 1 - (animal.directionRow + 1) * frameH;
+                    }
                 });
             });
         }
+
+        function forceSpawnDebugAnimals() {
+            // Spawn 1 of each near player
+            const types = [
+                { type: 'cat', tex: catTexture, scale: 0.5, speed: 0.1, follow: 10 },
+                { type: 'chicken', tex: chickenTexture, scale: 0.4, speed: 0.08, follow: 8 },
+                { type: 'cow', tex: cowTexture, scale: 1.2, speed: 0.06, follow: 12 },
+                { type: 'dragon', tex: dragonTexture, scale: 3.0, speed: 0.04, follow: 20 }
+            ];
+            
+            console.log("Force spawning debug animals...");
+            types.forEach((t, i) => {
+                const pos = playerPos.clone();
+                pos.x += 2 + i; // Offset
+                pos.z += 2;
+                
+                // Reuse generate logic manually for specific pos
+                const geo = new THREE.PlaneGeometry(t.scale, t.scale);
+                
+                // Configure texture for sprite sheet
+                const animTex = t.tex.clone();
+                animTex.needsUpdate = true;
+                animTex.wrapS = THREE.RepeatWrapping;
+                animTex.wrapT = THREE.RepeatWrapping;
+                const cols = 4;
+                const rows = 4;
+                animTex.repeat.set(1/cols, 1/rows);
+                animTex.offset.set(0, 1 - 1/rows);
+
+                const mat = new THREE.MeshBasicMaterial({ 
+                    map: animTex, transparent: true, side: THREE.FrontSide, depthWrite: false 
+                });
+                const visuals = new THREE.Group();
+                for (let offsetX = -1; offsetX <= 1; offsetX++) {
+                    for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
+                        const copy = new THREE.Mesh(geo, mat);
+                        copy.position.set(pos.x + offsetX * worldSize, pos.y, pos.z + offsetZ * worldSize);
+                        visuals.add(copy);
+                    }
+                }
+                
+                const healthBar = createHealthBar();
+                healthBar.visible = false;
+                
+                const group = new THREE.Group();
+                group.add(visuals);
+                group.add(healthBar);
+                scene.add(group);
+                
+                // Health stats
+                let maxHealth = 100;
+                if (t.type === 'dragon') maxHealth = 5000;
+                else if (t.type === 'cow') maxHealth = 200;
+                else if (t.type === 'cat') maxHealth = 50;
+                else if (t.type === 'chicken') maxHealth = 30;
+
+                otherAnimals.push({
+                    type: t.type, group, visuals, healthBar, position: pos, 
+                    speed: t.speed, followDistance: t.follow, 
+                    wanderDir: new THREE.Vector3(1,0,0), wanderTimer: 0,
+                    // Animation state
+                    cols: cols,
+                    rows: rows,
+                    currentFrame: 0,
+                    animationTimer: 0,
+                    directionRow: 0,
+                    lastDirectionRow: 0, 
+                    directionTimer: 0,
+                    // Stats
+                    health: maxHealth,
+                    maxHealth: maxHealth,
+                    lastAttackTime: 0
+                });
+            });
+        }
+
 
 
         function updatePlayerPosition() {
@@ -5116,6 +5308,8 @@ rotateCamera( 1)
                         destroyBlockInDirection();
                     } else if (equippedTool && equippedTool.id === TOOLS.FISHING_ROD.id) {
                         catchFish();
+                    } else if (!equippedTool && selectedMaterials.has(MATERIALS.WOOD.id)) {
+                        createCampfire();
                     }
                 } else if (event.code === 'AltLeft' || event.code === 'AltRight') {
                     event.preventDefault();
@@ -5299,10 +5493,9 @@ rotateCamera( 1)
             updateHungerAndHealth(); // Update hunger and health
             updateBears(deltaTime); // Update bear AI and attacks
             updateWolves(deltaTime); // Update wolf AI and attacks
-            updateFollowAnimals(cats, deltaTime);
-            updateFollowAnimals(chickens, deltaTime);
-            updateFollowAnimals(cows, deltaTime);
-            updateFollowAnimals(dragons, deltaTime);
+            
+            updateOtherAnimals(deltaTime); // Unified update for new animals
+            
             updateBushes(); // Update bush billboarding and regrowth
             updateCampfires(deltaTime); // Update campfires
             updateRain(deltaTime); // Update rain system and damage
