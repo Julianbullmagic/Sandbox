@@ -452,7 +452,7 @@
         // Game variables
         let scene, camera, renderer;
         let player, terrain = [], blockMeshes = [], trees = [];
-        let worldSize = 60;
+        let worldSize = 240;
         let blockSize = 1;
         
         // Material caching for better performance
@@ -462,7 +462,7 @@
         let cachedWoodMaterial = null;
         let cachedWaterMaterial = null;
         let noiseScale = 0.05;
-        let playerPos = new THREE.Vector3(30, 0, 30); // Center of 60x60 world
+        let playerPos = new THREE.Vector3(120, 0, 120); // Center of 240x240 world
         let keys = {};
         let cameraAngle = 0;        // radians around the player
         const rotationSpeed = 0.03; // radians per key-press
@@ -794,10 +794,10 @@
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x87CEEB);
             
-            // Add fog for reduced draw distance - 2x closer
-            scene.fog = new THREE.Fog(0x87CEEB, 5, 15); // Start at 5 blocks, complete at 15 blocks
+            // Add fog for reduced draw distance - adjusted for larger world
+            scene.fog = new THREE.Fog(0x87CEEB, 20, 50); // Start at 20 blocks, complete at 50 blocks
 
-            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 25); // Reduced far plane to 25
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 60); // Increased far plane to 60
 
             renderer = new THREE.WebGLRenderer({ 
                 antialias: false,
@@ -815,7 +815,7 @@
             scene.add(ambientLight);
 
             directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
-            directionalLight.position.set(50, 50, 25);
+            directionalLight.position.set(120, 50, 120);
             scene.add(directionalLight);
 
             // Load textures
@@ -988,7 +988,7 @@
             chickenTexture = await loadTextureWithTransparency('https://res.cloudinary.com/dfksh5mnb/image/upload/v1765284202/chicken_ykypbk.jpg', 0xFFFFFF);
             // Assuming these are the generated images for Cow and Dragon based on previous context
             cowTexture = await loadTextureWithTransparency('https://res.cloudinary.com/dfksh5mnb/image/upload/v1765285447/Gemini_Generated_Image_53p13f53p13f53p1_qxrpg9.png', 0x8B4513); 
-            dragonTexture = await loadTextureWithTransparency('https://res.cloudinary.com/dfksh5mnb/image/upload/v1765284531/Gemini_Generated_Image_a5drtha5drtha5dr_dqoc2p.png', 0xFF0000);
+            dragonTexture = await loadTextureWithTransparency('https://res.cloudinary.com/dfksh5mnb/image/upload/v1765284531/Gemini_Generated_Image_a5drtha5drtha5dr_dqoc2p.png', 0xFF0000, 180);
 
             // Load fishing animations
             const idleFishingFrontTexture = await loadTexture('https://res.cloudinary.com/dfksh5mnb/image/upload/v1703651832/idle_fishing_front_aupnm2.png');
